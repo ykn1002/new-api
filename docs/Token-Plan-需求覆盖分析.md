@@ -13,6 +13,24 @@
 
 ---
 
+## 〇、技术栈（new-api 现状）
+
+| 层 | 技术 |
+|---|---|
+| 后端 | Go 1.22+、Gin（HTTP 框架）、GORM v2（ORM） |
+| 前端 | 默认主题 `web/default`：React 19 + TypeScript + Rsbuild + Base UI + Tailwind CSS；经典主题 `web/classic`：React 18 + Vite + Semi Design |
+| 前端包管理 | Bun（优先于 npm/yarn/pnpm） |
+| 数据库 | SQLite / MySQL ≥5.7.8 / PostgreSQL ≥9.6（三者须同时兼容） |
+| 缓存 | Redis（go-redis）+ 进程内内存缓存 |
+| 鉴权 | JWT、WebAuthn/Passkeys、OAuth（GitHub/Discord/OIDC 等） |
+| 国际化 | 后端 `nicksnyder/go-i18n/v2`（en/zh）；前端 `i18next`（zh/en/fr/ru/ja/vi） |
+
+**分层架构**：`Router → Controller → Service → Model`，AI 转发在 `relay/`（各厂商适配器 `relay/channel/*`）。本方案改造主要落在 `model/`（积分批次、价格计划）、`service/`（扣减分摊、预警）、`controller/`+`router/`（积分/支付/小程序接口）、`setting/`（汇率/档位/默认模型配置）、`middleware/distributor.go`（默认模型强制）。
+
+> 约束（详见 `AGENTS.md`）：JSON 统一走 `common.Marshal/Unmarshal`；DB 代码须三库兼容（优先 GORM 抽象，慎用方言）；前端用 Bun；不得改动 new-api / QuantumNous 标识。
+
+---
+
 ## 一、总体概念映射
 
 | 方案概念 | new-api 对应 | 状态 | 说明 |
@@ -228,3 +246,26 @@ CustomCurrencyExchangeRate = 100    // 1 元 = 100 积分（不再需要 ×7.3=7
 **结论**：new-api 的**计费内核与运营后台基础设施**已覆盖约 65% 的本期能力，且大量 🟡 项只是「在已有内核上做语义包装/字段补齐」，真正从零新建的硬缺口约 16%，**集中在「积分产品化账本」**——即积分有效期、到期清零顺延、按来源分账与优先扣减（需引入「积分批次」模型，技术方案 M2）。
 
 其余重点新建项：全局默认模型/禁止选模型、微信支付接口、小程序账号一对一映射/自动开户、模型规则定时生效、看板数据导出。配置/包装类（积分=自定义货币、人民币≡美元、两位小数）成本低。**一处待评审澄清**：是否需要独立成本核算（成本→收入分层，见 B'）。
+
+---
+
+## 六、附录：主流国产模型 Token 计算口径
+
+> 结论先行：new-api 对国产模型一律**以上游官方返回的 `usage` 为准计费**，不在本地用 tiktoken 重算；仅当上游未返回 usage（极少数流式场景）才本地兜底估算。计费换算与模型无关：`quota =（输入 + 输出 × CompletionRatio）× ModelRatio × GroupRatio`。
+
+| 模型 | 渠道 | 响应处理 | Token 来源 |
+|---|---|---|---|
+| 文心一言 ERNIE | `baidu` | 专用 handler（`baidu/relay-baidu.go` `baiduHandler`/`baiduStreamHandler`）解析百度原生 `usage`→标准 `dto.Usage` | 上游返回的 `usage`（流式取 `TotalTokens`，补全=总-输入） |
+| 文心一言（V2 接入） | `baidu_v2` | OpenAI 兼容，复用 `openai.Adaptor.DoResponse` | 上游 `usage` |
+| 火山/豆包 Doubao | `volcengine` | OpenAI 兼容（`/api/v3/chat/completions`），复用 `openai.Adaptor.DoResponse` | 上游 `usage` |
+| 千问 Qwen | `ali` | 文本走 `openai.Adaptor.DoResponse`；流式主动设 `stream_options.include_usage=true` | 上游 `usage`（原生 `AliUsage{input_tokens,output_tokens}` 已规整） |
+| 智谱 GLM | `zhipu` / `zhipu_4v` | 专用 handler（`zhipu/relay-zhipu.go`）解析智谱原生 `usage`→标准 `dto.Usage`；若走 OpenAI 兼容端点则同火山/千问 | 上游 `usage` |
+| MiniMax | `minimax` | 文本走 `openai.Adaptor.DoResponse`（TTS 按 `usage_characters`，图像特殊） | 上游 `usage` |
+| 讯飞星火 Spark | `xunfei` | 专用 WebSocket handler（`xunfei/relay-xunfei.go`），从 `payload.usage.text` 累加 prompt/completion/total | 上游 `usage` |
+| DeepSeek | `deepseek` | OpenAI 兼容，复用 `openai.Adaptor.DoResponse`（Claude 格式走 claude 适配器） | 上游 `usage` |
+
+**本地兜底估算**（仅上游缺 usage 时）：
+- 输入：请求前 `EstimateRequestToken`（`service/token_counter.go`）预估的 prompt token；
+- 输出：`EstimateTokenByModel`（`service/token_estimator.go`）——以上模型名均不含 `gemini`/`claude`，故走 **OpenAI 风格字符估算**（非 tiktoken 精确编码）。
+
+**对积分计费的意义**：token 数由上游官方计量，准确且无需改造；接入新模型时只需为其配置 `ModelRatio`（输入元价/1K）与 `CompletionRatio`（输出/输入价比），即可得到正确的积分扣减。
