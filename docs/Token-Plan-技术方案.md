@@ -16,6 +16,9 @@
 | M5 默认模型 + 禁止选模型 | A-4 | 中间件 + 配置 | 中 |
 | M6 流水补字段 + 看板导出/聚合 | B-8/B-9 | 字段 + 接口 | 低 |
 | M7 小程序账号映射与自动开户 | 需求4/一对一 | 复用 OAuth 绑定 + 自动开户 | 中 |
+| M8 模型规则定时生效（调价预约） | 需求1/A-7 | 新建计划表 + 定时应用 | 中 |
+| M9 余额预警改造（百分比阈值+通知运营） | 需求3/B-13 | 改造预警逻辑 | 低 |
+| M10 成本核算（待澄清，可选） | B' | 视评审定 | — |
 
 ## 二、关键设计决策
 
@@ -265,7 +268,73 @@ if operation_setting.ForceDefaultModelEnabled && operation_setting.DefaultModelN
    - 未命中 → 单事务自动开户：创建 `User`（唯一 username 如 `mp_<seq>`、`group=default`、`role=common`、初始 `Quota=0` 或试用赠送）→ `CreateUserOAuthBindingWithTx` 绑定 → 签发 token。
 3. **并发首登去重**：依赖 `(provider_id, provider_user_id)` 唯一索引；插入冲突时回查已存在绑定取其 `user_id`，保证严格 1:1，绝不产生重复用户。
 
+**信任边界（关键安全点）**：new-api 必须确认 `mp_account_id` 可信，二选一或结合：
+
+- **A. new-api 直接 `jscode2session`**：小程序传 `code`，new-api 用 AppId/Secret 换 openid/unionid，身份由微信背书（更安全，推荐）。
+- **B. 小程序后端 ↔ new-api 服务端调用**：带共享密钥 HMAC 签名 + 时间戳防重放，new-api 校验后信任传入的 `mp_account_id`。
+
+切勿让客户端直接明文传 `mp_account_id` 而不校验（会被冒用顶号）。
+
+**与积分账户的关系**：自动开户后该 user 即拥有 `User.Quota` 与积分批次账本（M2）。**一个小程序账号 = 一个 new-api user = 一份积分账户**，天然满足一对一。
+
+**边界与策略**：账号合并本期不做（按 `mp_account_id` 独立开户）；封禁用 `User.Status`；不开放自助解绑（避免破坏 1:1）；开户可选回填昵称/手机号。
+
+---
+
+## M8 模型规则定时生效（调价预约）
+
+**目标**（docx 3.1「生效时间」）：可为模型计费规则配置未来生效时间，到点自动切换价格；现状 `ModelRatio`/`CompletionRatio`/`ModelPrice` 经 `UpdateXxxByJSONString` 改后**立即生效**，无预约。
+
+**设计**：新增「价格计划」表 `pricing_schedule`（加入 `AutoMigrate`）：
+
+```go
+type PricingSchedule struct {
+    Id             int     `json:"id"`
+    ModelName      string  `json:"model_name" gorm:"index"`
+    InputCNYPer1K  float64 `json:"input_cny_per_1k"`
+    OutputCNYPer1K float64 `json:"output_cny_per_1k"`
+    EffectiveTime  int64   `json:"effective_time" gorm:"index"` // 计划生效时间
+    Status         int     `json:"status" gorm:"index"`         // 1=待生效 2=已应用 3=取消
+    Operator       string  `json:"operator"`
+    CreatedAt      int64   `json:"created_at" gorm:"bigint"`
+}
+```
+
+- 后台任务 `ApplyDuePricingSchedules`（复用 `ExpireDueSubscriptions` 轮询范式）：扫 `status=待生效 AND effective_time<=now`，用 M1.5 换算成倍率 → `UpdateModelRatioByJSONString`/`UpdateCompletionRatioByJSONString` + `UpdateOption` 落库 → 置 `status=已应用` → 写审计。行锁 + 按 `id` 幂等。
+- **与待确认第7条一致**：生效时间只影响「之后请求」，不回算存量积分/进行中订单。
+- 前端：模型计费配置页加「立即生效 / 预约时间」，列出待生效计划，可取消。
+
+---
+
+## M9 余额预警改造（百分比阈值 + 通知运营）
+
+**目标**（docx 3.3、4.3）：①阈值支持**百分比**（剩余 < 20%，可配）；②低余额**同时通知运营**。
+
+**现状**：`service/quota.go` `checkAndSendQuotaNotify` 仅按**绝对值**阈值（`QuotaRemindThreshold`/用户级 `QuotaWarningThreshold`）通知**用户**（邮件/Webhook/Bark/Gotify）。
+
+**设计**：
+1. **百分比阈值**：阈值配置增加「类型(绝对/百分比) + 值」。钱包 quota 无固定总额，百分比**基数**取「该用户当前有效批次的 `Σ InitQuota`」（即最近一轮充值/赠送的发放总量），剩余 = `User.Quota`；`剩余 / 基数 < 阈值%` 即触发。基数为 0 时回退绝对值阈值。
+2. **通知运营**：在 `checkAndSendQuotaNotify` 触发分支追加一路 `NotifyAdmin`（新增），渠道复用现有 `dto.Notify`（运营邮箱/Webhook，配置项 `OpsNotifyTarget`）。用户、运营两路独立开关。
+3. 兼容：默认仍走绝对值，开「百分比模式」后按上式计算，不影响 `PostConsumeQuota` 主链路。
+
+---
+
+## M10 成本核算（待评审澄清，可选）
+
+**背景**（docx 1.4、3.6「成本估算」）：原需求设想 `tokens→成本→收入→积分` 三层；new-api 按**售价倍率**计费，无独立上游成本字段。
+
+**两种处置（评审定）**：
+- **A. 不做（推荐 MVP）**：看板「成本估算」用售价近似，或按固定成本系数估算。零开发。
+- **B. 做独立成本**：模型/渠道层增「成本单价(元/1K)」配置；`PostConsumeQuota` 时另算「成本 quota」记入 `Log.Other.cost`/`QuotaData`；看板成本估算 = Σ成本。中等开发，需逐次记两份金额。
+
+本期默认按 A，B 留待确认。
+
+---
+
+## 三、数据库迁移
+
 - 新增表 `quota_batch`：加入 `model/main.go` 的 `DB.AutoMigrate(...)` 列表（GORM 自动建表，跨 SQLite/MySQL/PG）。
+- 新增表 `pricing_schedule`（M8）：同样加入 `AutoMigrate`。
 - 账号映射**不新增表**：复用 `UserOAuthBinding`（`AutoMigrate` 已含），仅需初始化一个 `miniprogram` 虚拟 provider 记录（数据初始化，非建表）。
 - 不新增 `Log` 列（用 `Other` JSON 承载），避免 SQLite `ALTER COLUMN` 限制。
 - 存量数据迁移脚本：为 `Quota>0` 的老用户各插入一条初始批次（`source=充值, expired_time=0`），保证不变量 `Σ批次=User.Quota`。一次性，幂等（按 `BizRef="init-migration"` 去重）。
@@ -283,6 +352,7 @@ if operation_setting.ForceDefaultModelEnabled && operation_setting.DefaultModelN
 | GET | `/api/user/points/logs` | 积分明细（来源/操作后余额/类型筛选）| 用户 |
 | GET | `/api/data/export` | 看板数据导出 CSV | 管理员 |
 | POST | `/api/oauth/miniprogram/login` | 小程序登录：映射/自动开户 + 签发 token | 匿名（jscode2session 或服务端签名） |
+| GET/POST/DELETE | `/api/pricing/schedule` | 模型价格计划（预约/列表/取消，M8） | 超管 |
 | * | `/api/option`（档位/汇率/默认模型/微信支付配置）| 运营配置 | 超管 |
 
 ### 4.1 关键接口数据结构（积分/支付）
@@ -316,8 +386,11 @@ if operation_setting.ForceDefaultModelEnabled && operation_setting.DefaultModelN
 6. **M5 默认模型**（中，1-2d）：独立。
 7. **M6 流水/看板**（中，2-4d）：依赖 M2 的 source/batch。
 8. **M7 账号映射/自动开户**（中，2-3d）：复用 `UserOAuthBinding`，独立，可与 M4 微信支付一并联调（支付需 openid，正好同源）。
+9. **M8 定时生效**（中，2-3d）：计划表 + 定时应用任务，依赖 M1.5 换算。
+10. **M9 余额预警改造**（小，1-2d）：百分比阈值 + 通知运营，依赖 M2 批次（百分比基数取 `Σ InitQuota`）。
+11. **M10 成本核算**：待评审；做则中等工作量。
 
-建议顺序：M1 → M1.5 / M5 / M7（独立先行）→ M2 → M3 → M4 → M6。其中 M7 与 M4 同属小程序链路，建议连排。
+建议顺序：M1 → M1.5 / M5 / M7（独立先行）→ M2 → M3 → M4 → M6 → M8 / M9。M10 待确认。其中 M7 与 M4 同属小程序链路，建议连排。
 
 ## 六、风险与注意事项
 
@@ -339,6 +412,8 @@ if operation_setting.ForceDefaultModelEnabled && operation_setting.DefaultModelN
 | 过期轮询范式 | `model/subscription.go` `ExpireDueSubscriptions` |
 | 模型解析 | `middleware/distributor.go` `modelRequest.Model` |
 | 展示换算 | `logger/logger.go` `LogQuota`/`FormatQuota`；`operation_setting/general_setting.go` |
+| 余额预警逻辑（M9） | `service/quota.go` `checkAndSendQuotaNotify`；`NotifyUser`（追加 `NotifyAdmin`） |
+| 定时生效应用（M8） | 复用 `ExpireDueSubscriptions` 轮询范式 + `UpdateModelRatioByJSONString` 等 |
 | 充值档位配置 | `setting/operation_setting/payment_setting.go` |
 | 外部身份绑定/开户 | `model/user_oauth_binding.go`（`GetUserByOAuthBinding`/`CreateUserOAuthBindingWithTx`）；`controller/wechat.go`、`controller/oauth.go` `setupLogin` |
 
@@ -368,7 +443,7 @@ if operation_setting.ForceDefaultModelEnabled && operation_setting.DefaultModelN
 
 ## 八、本期暂不做（后期会支持）及前向兼容预留
 
-下列需求本期按方案「待确认问题」回复暂不实现，但后期会做。本期设计已为其预留扩展点，后续接入应尽量不改动 M1–M6 的既有结构。
+下列需求本期按方案「待确认问题」回复暂不实现，但后期会做。本期设计已为其预留扩展点，后续接入应尽量不改动 M1–M9 的既有结构。
 
 | # | 后期需求 | 当前设计的预留点 | 后期大致工作量 |
 |---|---|---|---|
@@ -385,18 +460,3 @@ if operation_setting.ForceDefaultModelEnabled && operation_setting.DefaultModelN
 2. 入账一律走 `AddQuotaBatch`、扣减一律走 `AllocateBatchConsume`，新增来源/退款只在这两个收口函数内扩展，不在各业务侧散落改 quota。
 3. 扣减优先级用可配置的「来源优先级表」而非硬编码，后期插入套餐层只需调整优先级映射。
 4. 所有入账/扣减带 `BizRef`/`reqId` 幂等键，为退款冲正与对账留出可追溯链路。
-
-**信任边界（关键安全点）**：new-api 必须确认 `mp_account_id` 可信，二选一或结合：
-
-- **A. new-api 直接 `jscode2session`**：小程序传 `code`，new-api 用 AppId/Secret 换 openid/unionid，身份由微信背书（更安全，推荐）。
-- **B. 小程序后端 ↔ new-api 服务端调用**：带共享密钥 HMAC 签名 + 时间戳防重放，new-api 校验后信任传入的 `mp_account_id`。
-
-切勿让客户端直接明文传 `mp_account_id` 而不校验（会被冒用顶号）。
-
-**与积分账户的关系**：自动开户后该 user 即拥有 `User.Quota` 与积分批次账本（M2）。**一个小程序账号 = 一个 new-api user = 一份积分账户**，天然满足一对一；充值/扣费/有效期全部走统一链路。
-
-**边界与策略**：
-- 账号合并（本期不做）：默认按 `mp_account_id` 独立开户，不与已有邮箱/手机号用户合并；如需按手机号合并列为后续。
-- 封禁：用 `User.Status` 控制，绑定关系不变。
-- 解绑/换绑：不对用户开放自助解绑，避免破坏 1:1（运营后台可处理异常）。
-- 资料回填：开户时可选写入昵称/手机号到 `DisplayName`/`Email` 等（若小程序提供且经用户授权）。
