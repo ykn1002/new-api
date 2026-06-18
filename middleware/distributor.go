@@ -17,11 +17,13 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type ModelRequest struct {
@@ -37,6 +39,10 @@ func Distribute() func(c *gin.Context) {
 		if err != nil {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
+		}
+		// 全局默认模型：开启后忽略客户端传入 model，强制路由到默认模型（用户不可选模型）
+		if forced, ok := enforceDefaultModel(c, modelRequest); ok {
+			modelRequest.Model = forced
 		}
 		if ok {
 			id, err := strconv.Atoi(channelId.(string))
@@ -79,6 +85,11 @@ func Distribute() func(c *gin.Context) {
 			if shouldSelectChannel {
 				if modelRequest.Model == "" {
 					abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorModelNameRequired))
+					return
+				}
+				// 模型一键下线门禁：开启后被下线的模型不可调用
+				if operation_setting.GetCreditSetting().EnforceModelStatus && model.IsModelDisabled(modelRequest.Model) {
+					abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("模型 %s 已下线，暂不可用", modelRequest.Model))
 					return
 				}
 				var selectGroup string
@@ -231,6 +242,36 @@ func getJSONStringValue(result gjson.Result, field string) (string, error) {
 		return "", fmt.Errorf("field %s must be a string", field)
 	}
 	return result.String(), nil
+}
+
+// enforceDefaultModel 全局默认模型强制改写（缺口 A-4 / 需求 6）。
+//
+// 开启 credit_setting.default_model_enabled 后：忽略客户端传入的 model，强制改写为
+// DefaultModel，并把请求体里的 model 字段同步改写，使其一路透传到上游。
+// 返回 (强制后的模型名, 是否生效)。仅对带 model 字段的 JSON 请求生效；空请求/已等于默认模型时跳过 body 重写。
+func enforceDefaultModel(c *gin.Context, modelRequest *ModelRequest) (string, bool) {
+	cs := operation_setting.GetCreditSetting()
+	if !cs.DefaultModelEnabled || cs.DefaultModel == "" {
+		return "", false
+	}
+	forced := cs.DefaultModel
+	if modelRequest.Model == forced {
+		return forced, true
+	}
+	// 同步重写请求体中的 model 字段（仅 JSON 体）
+	if storage, err := common.GetBodyStorage(c); err == nil {
+		if body, err := storage.Bytes(); err == nil && gjson.ValidBytes(body) && gjson.GetBytes(body, "model").Exists() {
+			if newBody, err := sjson.SetBytes(body, "model", forced); err == nil {
+				if bs, err := common.CreateBodyStorage(newBody); err == nil {
+					c.Set(common.KeyBodyStorage, bs)
+					if _, seekErr := bs.Seek(0, io.SeekStart); seekErr == nil {
+						c.Request.Body = io.NopCloser(bs)
+					}
+				}
+			}
+		}
+	}
+	return forced, true
 }
 
 func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {

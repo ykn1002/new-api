@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import * as z from 'zod'
+import { NumberInput } from '@/components/number-input'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useTranslation } from 'react-i18next'
@@ -29,7 +30,6 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
-import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import {
   SettingsForm,
@@ -40,7 +40,7 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
-import { safeNumberFieldProps } from '../utils/numeric-field'
+import { numberFieldProps } from '../utils/numeric-field'
 
 const behaviorSchema = z.object({
   RetryTimes: z.coerce.number().min(0).max(10),
@@ -93,11 +93,10 @@ export function SystemBehaviorSection({
               <FormItem>
                 <FormLabel>{t('Retry Times')}</FormLabel>
                 <FormControl>
-                  <Input
-                    type='number'
+                  <NumberInput
                     min='0'
                     max='10'
-                    {...safeNumberFieldProps(field)}
+                    {...numberFieldProps(field)}
                   />
                 </FormControl>
                 <FormDescription>

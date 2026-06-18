@@ -3,6 +3,8 @@ package model
 import (
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -20,6 +22,62 @@ type BoundChannel struct {
 	Name string `json:"name"`
 	Type int    `json:"type"`
 }
+
+// 下线模型名缓存（Model.Status != 1），用于 distributor 轻量门禁，避免每次请求查库。
+var (
+	disabledModelsCache   map[string]struct{}
+	disabledModelsExpire  int64
+	disabledModelsMu      sync.RWMutex
+	disabledModelsCacheTTL = int64(60) // 秒
+)
+
+// IsModelDisabled 返回该模型是否已下线（Model.Status != 1）。带 TTL 缓存。
+// 未在 model 注册表中的模型视为「未下线」（不拦截），交由渠道/能力鉴权决定。
+func IsModelDisabled(modelName string) bool {
+	if modelName == "" {
+		return false
+	}
+	now := time.Now().Unix()
+	disabledModelsMu.RLock()
+	cache := disabledModelsCache
+	expire := disabledModelsExpire
+	disabledModelsMu.RUnlock()
+
+	if cache == nil || now > expire {
+		cache = refreshDisabledModelsCache(now)
+	}
+	_, disabled := cache[modelName]
+	return disabled
+}
+
+func refreshDisabledModelsCache(now int64) map[string]struct{} {
+	disabledModelsMu.Lock()
+	defer disabledModelsMu.Unlock()
+	// 双重检查，避免并发重复刷新
+	if disabledModelsCache != nil && now <= disabledModelsExpire {
+		return disabledModelsCache
+	}
+	var rows []Model
+	cache := map[string]struct{}{}
+	if err := DB.Model(&Model{}).Select("model_name").Where("status != ?", 1).Find(&rows).Error; err == nil {
+		for _, r := range rows {
+			cache[r.ModelName] = struct{}{}
+		}
+	} else {
+		common.SysLog("failed to refresh disabled models cache: " + err.Error())
+	}
+	disabledModelsCache = cache
+	disabledModelsExpire = now + disabledModelsCacheTTL
+	return cache
+}
+
+// InvalidateDisabledModelsCache 模型启停变更后调用，立即失效缓存。
+func InvalidateDisabledModelsCache() {
+	disabledModelsMu.Lock()
+	disabledModelsExpire = 0
+	disabledModelsMu.Unlock()
+}
+
 
 type Model struct {
 	Id           int            `json:"id"`

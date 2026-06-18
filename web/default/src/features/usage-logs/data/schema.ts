@@ -45,6 +45,9 @@ export const usageLogSchema = z.object({
   other: z.string().default(''),
   request_id: z.string().default(''),
   upstream_request_id: z.string().default(''),
+  // Token Plan: credit source + balance after this entry
+  credit_source: z.string().default(''),
+  balance_after: z.number().default(0),
 })
 
 export type UsageLog = z.infer<typeof usageLogSchema>

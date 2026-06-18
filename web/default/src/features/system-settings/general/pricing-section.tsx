@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import * as z from 'zod'
+import { NumberInput } from '@/components/number-input'
 import type { Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useTranslation } from 'react-i18next'
@@ -51,7 +52,7 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useSettingsForm } from '../hooks/use-settings-form'
 import { useUpdateOption } from '../hooks/use-update-option'
-import { safeNumberFieldProps } from '../utils/numeric-field'
+import { numberFieldProps } from '../utils/numeric-field'
 
 const createPricingSchema = (t: (key: string) => string) =>
   z
@@ -241,10 +242,9 @@ export function PricingSection({ defaultValues }: PricingSectionProps) {
                           : t('USD Exchange Rate')}
                     </FormLabel>
                     <FormControl>
-                      <Input
-                        type='number'
+                      <NumberInput
                         step='0.01'
-                        {...safeNumberFieldProps(field)}
+                        {...numberFieldProps(field)}
                       />
                     </FormControl>
                     <FormDescription>

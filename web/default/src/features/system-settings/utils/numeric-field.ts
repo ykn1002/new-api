@@ -89,3 +89,34 @@ export function safeNumberFieldProps<
     ref: field.ref,
   }
 }
+
+/**
+ * Props for binding a react-hook-form numeric field to the {@link NumberInput}
+ * component, which (unlike a raw controlled `<input type="number">`) lets the
+ * user fully clear the field and retype without snapping back, while still
+ * never writing `NaN` into form state.
+ */
+export type NumberFieldProps = {
+  value: number | ''
+  onValueChange: (value: number) => void
+  onBlur: () => void
+  name: string
+}
+
+export function numberFieldProps<
+  TFieldValues extends FieldValues,
+  TName extends FieldPath<TFieldValues>,
+>(field: ControllerRenderProps<TFieldValues, TName>): NumberFieldProps {
+  const raw = field.value as unknown
+  const display: number | '' =
+    typeof raw === 'number' && Number.isFinite(raw) ? raw : ''
+
+  return {
+    value: display,
+    onValueChange: (value) =>
+      (field.onChange as (value: number) => void)(value),
+    onBlur: field.onBlur,
+    name: field.name,
+  }
+}
+

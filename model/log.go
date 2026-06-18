@@ -53,6 +53,10 @@ type Log struct {
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
 	Other             string `json:"other"`
+	// CreditSource 记录该笔变动涉及的积分来源（gift/subscription/topup），消费可能跨来源时取主要来源。
+	CreditSource string `json:"credit_source,omitempty" gorm:"type:varchar(16);index;default:''"`
+	// BalanceAfter 记录该笔操作后的用户额度余额（quota，与 User.Quota 同口径），用于明细连续展示。
+	BalanceAfter int `json:"balance_after" gorm:"default:0"`
 }
 
 // don't use iota, avoid change log type value
@@ -65,6 +69,14 @@ const (
 	LogTypeError   = 5
 	LogTypeRefund  = 6
 	LogTypeLogin   = 7
+	LogTypeExpire  = 8 // 积分批次到期清零
+)
+
+// 积分来源（CreditSource / CreditBatch.Source）
+const (
+	CreditSourceGift         = "gift"         // 赠送
+	CreditSourceSubscription = "subscription" // 套餐发放
+	CreditSourceTopup        = "topup"        // 充值
 )
 
 func formatUserLogs(logs []*Log, startIdx int) {
@@ -106,6 +118,24 @@ func RecordLog(userId int, logType int, content string) {
 	err := LOG_DB.Create(log).Error
 	if err != nil {
 		common.SysLog("failed to record log: " + err.Error())
+	}
+}
+
+// RecordCreditLog 记录一条带「来源 + 操作后余额」的积分流水（充值/赠送/过期/代充）。
+func RecordCreditLog(userId int, logType int, content string, creditSource string, balanceAfter int) {
+	username, _ := GetUsernameById(userId, false)
+	log := &Log{
+		UserId:       userId,
+		Username:     username,
+		CreatedAt:    common.GetTimestamp(),
+		Type:         logType,
+		Content:      content,
+		CreditSource: creditSource,
+		BalanceAfter: balanceAfter,
+	}
+	err := LOG_DB.Create(log).Error
+	if err != nil {
+		common.SysLog("failed to record credit log: " + err.Error())
 	}
 }
 

@@ -48,6 +48,9 @@ export interface AuthUser {
   stripe_customer?: string
   sidebar_modules?: string
   permissions?: UserPermissions
+  // Token Plan: current subscription plan name, low-balance flag (from /api/user/self)
+  current_plan?: string
+  low_balance?: boolean
 }
 
 interface AuthState {

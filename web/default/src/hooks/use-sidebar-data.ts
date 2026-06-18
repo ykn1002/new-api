@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   Activity,
   Box,
+  Coins,
   CreditCard,
   FileText,
   FlaskConical,
@@ -106,6 +107,11 @@ export function useSidebarData(): SidebarData {
             icon: Wallet,
           },
           {
+            title: t('Credit Composition'),
+            url: '/credit',
+            icon: Coins,
+          },
+          {
             title: t('Profile'),
             url: '/profile',
             icon: User,
@@ -130,6 +136,11 @@ export function useSidebarData(): SidebarData {
             title: t('Users'),
             url: '/users',
             icon: Users,
+          },
+          {
+            title: t('Credit Pool'),
+            url: '/credit-pool',
+            icon: Coins,
           },
           {
             title: t('Redemption Codes'),

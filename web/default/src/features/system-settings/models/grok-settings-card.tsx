@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect, useMemo, useRef } from 'react'
+import { NumberInput } from '@/components/number-input'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -31,7 +32,6 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
-import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import {
   SettingsForm,
@@ -41,7 +41,7 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
-import { safeNumberFieldProps } from '../utils/numeric-field'
+import { numberFieldProps } from '../utils/numeric-field'
 
 const XAI_VIOLATION_FEE_DOC_URL =
   'https://docs.x.ai/docs/models#usage-guidelines-violation-fee'
@@ -181,11 +181,10 @@ export function GrokSettingsCard(props: Props) {
               <FormItem className='max-w-xs'>
                 <FormLabel>{t('Violation deduction amount')}</FormLabel>
                 <FormControl>
-                  <Input
-                    type='number'
+                  <NumberInput
                     step={0.01}
                     min={0}
-                    {...safeNumberFieldProps(field)}
+                    {...numberFieldProps(field)}
                     disabled={!enabled}
                   />
                 </FormControl>

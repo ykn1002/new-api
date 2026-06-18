@@ -476,12 +476,48 @@ func GetSelf(c *gin.Context) {
 		"permissions":       permissions,                // 新增权限字段
 	}
 
+	// Token Plan 扩展字段：当前套餐名、低余额预警标识、即将过期提示（供小程序轮询）
+	enrichSelfCreditInfo(responseData, user)
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 		"data":    responseData,
 	})
 	return
+}
+
+// enrichSelfCreditInfo 为 /api/user/self 补充积分产品化相关字段。
+func enrichSelfCreditInfo(data map[string]interface{}, user *model.User) {
+	// 当前套餐名（展示，不开放购买）
+	if subs, err := model.GetAllActiveUserSubscriptions(user.Id); err == nil && len(subs) > 0 && subs[0].Subscription != nil {
+		if planInfo, err := model.GetSubscriptionPlanInfoByUserSubscriptionId(subs[0].Subscription.Id); err == nil && planInfo != nil {
+			data["current_plan"] = planInfo.PlanTitle
+		}
+	}
+
+	// 低余额预警标识（百分比阈值，基准=未过期批次 InitialQuota 之和）
+	lowBalance := false
+	warnPercent := operation_setting.GetCreditSetting().LowBalanceWarnPercent
+	if user.Quota <= 0 {
+		lowBalance = true
+	} else if warnPercent > 0 {
+		if base, err := model.SumActiveInitialQuota(user.Id); err == nil && base > 0 {
+			if float64(user.Quota)/float64(base) < warnPercent/100.0 {
+				lowBalance = true
+			}
+		}
+	}
+	data["low_balance"] = lowBalance
+
+	// 即将过期提示
+	if nearest, err := model.NearestExpiringBatch(user.Id); err == nil && nearest != nil {
+		data["expiring_soon"] = map[string]interface{}{
+			"remaining": nearest.Remaining,
+			"expire_at": nearest.ExpireAt,
+			"source":    nearest.Source,
+		}
+	}
 }
 
 // 计算用户权限的辅助函数
@@ -922,6 +958,10 @@ type ManageRequest struct {
 	Action string `json:"action"`
 	Value  int    `json:"value"`
 	Mode   string `json:"mode"`
+	// 代充值按档位（image6）：选择档位 + 额外赠送 + 原因备注
+	TierId      string `json:"tier_id"`
+	GiftValue   int    `json:"gift_value"`   // 额外赠送积分对应 quota（可选）
+	Reason      string `json:"reason"`       // 原因备注
 }
 
 // ManageUser Only admin user can do this
@@ -1000,13 +1040,32 @@ func ManageUser(c *gin.Context) {
 				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
 				return
 			}
-			if err := model.IncreaseUserQuota(user.Id, req.Value, true); err != nil {
+			// 走统一入口 CreditUserQuota：建 topup 批次 + 加余额 + 写来源/操作后余额流水
+			if err := model.CreditUserQuota(model.CreditGrant{
+				UserId:     user.Id,
+				Source:     model.CreditSourceTopup,
+				SourceRef:  "admin",
+				Quota:      req.Value,
+				Reason:     manageReasonOrDefault(req.Reason, "管理员代充"),
+				OperatorId: c.GetInt("id"),
+				LogType:    model.LogTypeManage,
+			}); err != nil {
 				common.ApiError(c, err)
 				return
 			}
 			recordManageAuditFor(c, user.Id, "user.quota_add", map[string]interface{}{
-				"quota": logger.LogQuota(req.Value),
+				"quota":  logger.LogQuota(req.Value),
+				"reason": req.Reason,
 			})
+		case "tier":
+			if apiErr := manageAddQuotaByTier(c, user.Id, req); apiErr != nil {
+				return
+			}
+			recordManageAuditFor(c, user.Id, "user.quota_add_tier", map[string]interface{}{
+				"tier_id": req.TierId,
+				"reason":  req.Reason,
+			})
+			return
 		case "subtract":
 			if req.Value <= 0 {
 				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)

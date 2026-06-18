@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
@@ -25,7 +26,16 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { Dialog } from '@/components/dialog'
+import { listRechargeTiers } from '@/features/system-settings/credit/api'
 import { adjustUserQuota } from '../api'
 import type { QuotaAdjustMode } from '../types'
 
@@ -42,6 +52,15 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
   const [mode, setMode] = useState<QuotaAdjustMode>('add')
   const [amount, setAmount] = useState('')
   const [loading, setLoading] = useState(false)
+  const [tierId, setTierId] = useState('')
+  const [giftAmount, setGiftAmount] = useState('')
+  const [reason, setReason] = useState('')
+
+  const { data: tiers } = useQuery({
+    queryKey: ['recharge-tiers'],
+    queryFn: listRechargeTiers,
+    enabled: props.open,
+  })
 
   const { meta: currencyMeta } = getCurrencyDisplay()
   const currencyLabel = getCurrencyLabel()
@@ -68,6 +87,38 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
   }
 
   const handleConfirm = async () => {
+    if (mode === 'tier') {
+      if (!tierId) {
+        toast.error(t('Please select a recharge tier'))
+        return
+      }
+      setLoading(true)
+      try {
+        const result = await adjustUserQuota({
+          id: props.userId,
+          action: 'add_quota',
+          mode: 'tier',
+          value: 0,
+          tier_id: tierId,
+          gift_value: parseQuotaFromDollars(parseFloat(giftAmount) || 0),
+          reason: reason || undefined,
+        })
+        if (result.success) {
+          toast.success(t('Quota adjusted successfully'))
+          resetForm()
+          props.onOpenChange(false)
+          props.onSuccess()
+        } else {
+          toast.error(result.message || t('Failed to adjust quota'))
+        }
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : t('Failed to adjust quota'))
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
     if (!amount && mode !== 'override') return
     if (quotaValue <= 0 && mode !== 'override') return
 
@@ -83,8 +134,7 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
       })
       if (result.success) {
         toast.success(t('Quota adjusted successfully'))
-        setAmount('')
-        setMode('add')
+        resetForm()
         props.onOpenChange(false)
         props.onSuccess()
       } else {
@@ -97,9 +147,16 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
     }
   }
 
-  const handleCancel = () => {
+  const resetForm = () => {
     setAmount('')
     setMode('add')
+    setTierId('')
+    setGiftAmount('')
+    setReason('')
+  }
+
+  const handleCancel = () => {
+    resetForm()
     props.onOpenChange(false)
   }
 
@@ -127,12 +184,14 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
       }
     >
       <div className='space-y-4'>
-        <div className='text-muted-foreground text-sm'>{getPreviewText()}</div>
+        {mode !== 'tier' && (
+          <div className='text-muted-foreground text-sm'>{getPreviewText()}</div>
+        )}
 
         <div className='space-y-2'>
           <Label>{t('Mode')}</Label>
-          <div className='flex gap-1'>
-            {(['add', 'subtract', 'override'] as const).map((m) => (
+          <div className='flex flex-wrap gap-1'>
+            {(['add', 'subtract', 'override', 'tier'] as const).map((m) => (
               <Button
                 key={m}
                 type='button'
@@ -151,28 +210,79 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
                   ? t('Add')
                   : m === 'subtract'
                     ? t('Subtract')
-                    : t('Override')}
+                    : m === 'override'
+                      ? t('Override')
+                      : t('By Tier')}
               </Button>
             ))}
           </div>
         </div>
 
-        <div className='space-y-2'>
-          <Label>
-            {t('Amount')} ({currencyLabel})
-          </Label>
-          <Input
-            type='number'
-            step={tokensOnly ? 1 : 0.000001}
-            min={mode === 'override' ? undefined : 0}
-            placeholder={placeholder}
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleConfirm()
-            }}
-          />
-        </div>
+        {mode === 'tier' ? (
+          <>
+            <div className='space-y-2'>
+              <Label>{t('Recharge Tier')}</Label>
+              <Select
+                value={tierId}
+                onValueChange={(value) => setTierId(value ?? '')}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={t('Select a recharge tier')} />
+                </SelectTrigger>
+                <SelectContent alignItemWithTrigger={false}>
+                  {(tiers ?? [])
+                    .filter((tier) => tier.status === 1)
+                    .map((tier) => (
+                      <SelectItem key={tier.id} value={tier.id}>
+                        {tier.name} · ¥{tier.amount} · {tier.base_credits}
+                        {tier.gift_credits > 0
+                          ? ` +${tier.gift_credits}`
+                          : ''}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className='space-y-2'>
+              <Label>
+                {t('Extra gift')} ({currencyLabel})
+              </Label>
+              <Input
+                type='number'
+                min={0}
+                placeholder={t('Optional extra gift amount')}
+                value={giftAmount}
+                onChange={(e) => setGiftAmount(e.target.value)}
+              />
+            </div>
+            <div className='space-y-2'>
+              <Label>{t('Reason')}</Label>
+              <Textarea
+                rows={2}
+                placeholder={t('Optional note for audit log')}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+              />
+            </div>
+          </>
+        ) : (
+          <div className='space-y-2'>
+            <Label>
+              {t('Amount')} ({currencyLabel})
+            </Label>
+            <Input
+              type='number'
+              step={tokensOnly ? 1 : 0.000001}
+              min={mode === 'override' ? undefined : 0}
+              placeholder={placeholder}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleConfirm()
+              }}
+            />
+          </div>
+        )}
       </div>
     </Dialog>
   )

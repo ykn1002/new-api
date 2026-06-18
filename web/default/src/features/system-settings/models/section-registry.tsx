@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { ChannelAffinitySection } from '../general/channel-affinity'
 import { IoNetDeploymentSettingsSection } from '../integrations/ionet-deployment-settings-section'
+import { ModelPriceScheduleSection } from '../credit/model-price-schedule-section'
 import type { ModelSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 import { ClaudeSettingsCard } from './claude-settings-card'
@@ -153,6 +154,11 @@ const MODELS_SECTIONS = [
         }}
       />
     ),
+  },
+  {
+    id: 'scheduled-pricing',
+    titleKey: 'Scheduled Model Pricing',
+    build: () => <ModelPriceScheduleSection />,
   },
 ] as const
 

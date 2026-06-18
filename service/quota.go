@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -37,6 +38,42 @@ type QuotaInfo struct {
 	ModelPrice    float64
 	ModelRatio    float64
 	GroupRatio    float64
+}
+
+// AlignQuotaToDisplayPrecision 把单次调用结算出的 quota 对齐到「积分 2 位小数向上取整」。
+//
+// 仅在 QuotaDisplayType=CUSTOM（积分）且 credit_setting.round_to_display_precision 开启时生效。
+// 口径：积分 = quota/QuotaPerUnit × 汇率；按 2 位小数 ceil（精度到分）后换算回 quota。
+// 等价于把 quota 向上取整到「一分积分对应的 quota」的整数倍。其余情况原样返回。
+func AlignQuotaToDisplayPrecision(quota int) int {
+	if quota <= 0 {
+		return quota
+	}
+	cs := operation_setting.GetCreditSetting()
+	if !cs.RoundToDisplayPrecision {
+		return quota
+	}
+	if operation_setting.GetQuotaDisplayType() != operation_setting.QuotaDisplayTypeCustom {
+		return quota
+	}
+	rate := operation_setting.GetGeneralSetting().CustomCurrencyExchangeRate
+	if rate <= 0 || common.QuotaPerUnit <= 0 {
+		return quota
+	}
+	// 一分积分对应的 quota = QuotaPerUnit / (rate × 100)
+	centQuota := decimal.NewFromFloat(common.QuotaPerUnit).
+		Div(decimal.NewFromFloat(rate).Mul(decimal.NewFromInt(100)))
+	if centQuota.LessThanOrEqual(decimal.Zero) {
+		return quota
+	}
+	units := decimal.NewFromInt(int64(quota)).Div(centQuota).Ceil()
+	aligned := units.Mul(centQuota).Ceil()
+	result := int(aligned.IntPart())
+	if result < quota {
+		// 数值安全兜底：对齐结果不应小于原始 quota
+		return quota
+	}
+	return result
 }
 
 func hasCustomModelRatio(modelName string, currentRatio float64) bool {
@@ -222,6 +259,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
 			"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, modelName, relayInfo.FinalPreConsumedQuota))
 	} else {
+		quota = AlignQuotaToDisplayPrecision(quota)
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
@@ -229,6 +267,8 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
 	}
+
+	SettleCreditConsume(ctx, relayInfo, quota)
 
 	logModel := modelName
 	if extraContent != "" {
@@ -343,6 +383,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
 			"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, relayInfo.OriginModelName, relayInfo.FinalPreConsumedQuota))
 	} else {
+		quota = AlignQuotaToDisplayPrecision(quota)
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
@@ -350,6 +391,8 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
 	}
+
+	SettleCreditConsume(ctx, relayInfo, quota)
 
 	logModel := relayInfo.OriginModelName
 	if extraContent != "" {
@@ -460,8 +503,20 @@ func checkAndSendQuotaNotify(relayInfo *relaycommon.RelayInfo, quota int, preCon
 		//noMoreQuota := userCache.Quota-(quota+preConsumedQuota) <= 0
 		quotaTooLow := false
 		consumeQuota := quota + preConsumedQuota
-		if relayInfo.UserQuota-consumeQuota < threshold {
+		remaining := relayInfo.UserQuota - consumeQuota
+		// 绝对值阈值（兜底）
+		if remaining < threshold {
 			quotaTooLow = true
+		}
+		// 百分比阈值：剩余/基准 < 配置百分比（基准=未过期批次 InitialQuota 之和）
+		if !quotaTooLow {
+			if cs := operation_setting.GetCreditSetting(); cs.LowBalanceWarnPercent > 0 {
+				if base, err := model.SumActiveInitialQuota(relayInfo.UserId); err == nil && base > 0 {
+					if float64(remaining)/float64(base) < cs.LowBalanceWarnPercent/100.0 {
+						quotaTooLow = true
+					}
+				}
+			}
 		}
 		if quotaTooLow {
 			prompt := "您的额度即将用尽"
@@ -492,6 +547,13 @@ func checkAndSendQuotaNotify(relayInfo *relaycommon.RelayInfo, quota int, preCon
 			err := NotifyUser(relayInfo.UserId, relayInfo.UserEmail, relayInfo.UserSetting, dto.NewNotify(dto.NotifyTypeQuotaExceed, prompt, content, values))
 			if err != nil {
 				common.SysError(fmt.Sprintf("failed to send quota notify to user %d: %s", relayInfo.UserId, err.Error()))
+			}
+
+			// 同时通知运营（复用 NotifyRootUser），可配置开关
+			if operation_setting.GetCreditSetting().NotifyRootOnLowBalance {
+				NotifyRootUser(dto.NotifyTypeQuotaExceed,
+					"用户低余额提醒",
+					fmt.Sprintf("用户 %d 余额即将用尽，当前剩余额度：%s", relayInfo.UserId, logger.FormatQuota(relayInfo.UserQuota)))
 			}
 		}
 	})

@@ -242,6 +242,10 @@ export interface UserWalletData {
   aff_count: number
   /** User group */
   group: string
+  /** Token Plan: current subscription plan name */
+  current_plan?: string
+  /** Token Plan: low-balance warning flag */
+  low_balance?: boolean
 }
 
 /**

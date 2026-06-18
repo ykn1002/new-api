@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect } from 'react'
+import { NumberInput } from '@/components/number-input'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -30,7 +31,6 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
-import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -48,7 +48,7 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
-import { safeNumberFieldProps } from '../utils/numeric-field'
+import { numberFieldProps } from '../utils/numeric-field'
 
 const dataDashboardSchema = z.object({
   DataExportEnabled: z.boolean(),
@@ -128,12 +128,11 @@ export function DashboardSection({ defaultValues }: DashboardSectionProps) {
                 <FormItem>
                   <FormLabel>{t('Refresh interval (minutes)')}</FormLabel>
                   <FormControl>
-                    <Input
-                      type='number'
+                    <NumberInput
                       min={1}
                       max={1440}
                       step={1}
-                      {...safeNumberFieldProps(field)}
+                      {...numberFieldProps(field)}
                       disabled={!isEnabled}
                     />
                   </FormControl>

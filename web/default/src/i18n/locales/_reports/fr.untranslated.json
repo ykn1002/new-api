@@ -1,0 +1,16 @@
+{
+  "Also notify the root user when a user runs low on balance": "Also notify the root user when a user runs low on balance",
+  "Are you sure you want to delete \"{{name}}\"?": "Are you sure you want to delete \"{{name}}\"?",
+  "Are you sure you want to delete this scheduled change?": "Are you sure you want to delete this scheduled change?",
+  "Configure at least one of model ratio or completion ratio": "Configure at least one of model ratio or completion ratio",
+  "Configure recharge tiers with base credits, gift credits and validity.": "Configure recharge tiers with base credits, gift credits and validity.",
+  "Effective time must be in the future": "Effective time must be in the future",
+  "How often the background task expires due batches and applies due price schedules": "How often the background task expires due batches and applies due price schedules",
+  "Ignore the client-specified model and force-route all requests to the default model": "Ignore the client-specified model and force-route all requests to the default model",
+  "Low balance, please top up": "Low balance, please top up",
+  "Please select a recharge tier": "Please select a recharge tier",
+  "Reject calls to models that are offline (Model.Status != enabled)": "Reject calls to models that are offline (Model.Status != enabled)",
+  "Round each call settlement up to 2-decimal credit precision (CUSTOM currency only)": "Round each call settlement up to 2-decimal credit precision (CUSTOM currency only)",
+  "Round settlement to 2-decimal credits": "Round settlement to 2-decimal credits",
+  "Schedule model ratio changes to take effect at a future time. Only affects future requests.": "Schedule model ratio changes to take effect at a future time. Only affects future requests."
+}

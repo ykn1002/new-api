@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import * as React from 'react'
+import { NumberInput } from '@/components/number-input'
 import * as z from 'zod'
 import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -55,7 +56,7 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
-import { safeNumberFieldProps } from '../utils/numeric-field'
+import { numberFieldProps } from '../utils/numeric-field'
 import { AmountDiscountVisualEditor } from './amount-discount-visual-editor'
 import { AmountOptionsVisualEditor } from './amount-options-visual-editor'
 import { CreemProductsVisualEditor } from './creem-products-visual-editor'
@@ -873,11 +874,10 @@ export function PaymentSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Price (local currency / USD)')}</FormLabel>
                     <FormControl>
-                      <Input
-                        type='number'
+                      <NumberInput
                         step='0.01'
                         min={0}
-                        {...safeNumberFieldProps(field)}
+                        {...numberFieldProps(field)}
                       />
                     </FormControl>
                     <FormDescription>
@@ -897,11 +897,10 @@ export function PaymentSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Minimum top-up (USD)')}</FormLabel>
                     <FormControl>
-                      <Input
-                        type='number'
+                      <NumberInput
                         step='0.01'
                         min={0}
-                        {...safeNumberFieldProps(field)}
+                        {...numberFieldProps(field)}
                       />
                     </FormControl>
                     <FormDescription>
@@ -1305,11 +1304,10 @@ export function PaymentSettingsSection({
                       {t('Unit price (local currency / USD)')}
                     </FormLabel>
                     <FormControl>
-                      <Input
-                        type='number'
+                      <NumberInput
                         step='0.01'
                         min={0}
-                        {...safeNumberFieldProps(field)}
+                        {...numberFieldProps(field)}
                       />
                     </FormControl>
                     <FormDescription>
@@ -1327,11 +1325,10 @@ export function PaymentSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Minimum top-up (USD)')}</FormLabel>
                     <FormControl>
-                      <Input
-                        type='number'
+                      <NumberInput
                         step='0.01'
                         min={0}
-                        {...safeNumberFieldProps(field)}
+                        {...numberFieldProps(field)}
                       />
                     </FormControl>
                     <FormDescription>

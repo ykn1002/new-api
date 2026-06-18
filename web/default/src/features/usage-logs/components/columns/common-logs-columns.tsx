@@ -748,6 +748,41 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
     },
 
     {
+      accessorKey: 'credit_source',
+      header: t('Source'),
+      cell: ({ row }) => {
+        const source = row.getValue('credit_source') as string
+        if (!source) return null
+        const labelMap: Record<string, string> = {
+          gift: t('Gift'),
+          subscription: t('Subscription'),
+          topup: t('Top-up credits'),
+        }
+        return (
+          <span className='text-muted-foreground text-xs'>
+            {labelMap[source] ?? source}
+          </span>
+        )
+      },
+    },
+
+    {
+      accessorKey: 'balance_after',
+      header: t('Balance after'),
+      cell: ({ row }) => {
+        const log = row.original
+        const balanceAfter = row.getValue('balance_after') as number
+        // 仅对带余额快照的进账/过期类流水展示
+        if (!balanceAfter || log.type === 2) return null
+        return (
+          <span className='text-xs tabular-nums'>
+            {formatLogQuota(balanceAfter)}
+          </span>
+        )
+      },
+    },
+
+    {
       accessorKey: 'content',
       header: t('Details'),
       cell: function DetailsCell({ row }) {

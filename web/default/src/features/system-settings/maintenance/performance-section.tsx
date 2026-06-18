@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { NumberInput } from '@/components/number-input'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -68,7 +69,7 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
-import { safeNumberFieldProps } from '../utils/numeric-field'
+import { numberFieldProps } from '../utils/numeric-field'
 
 /**
  * IMPORTANT: react-hook-form 7 interprets dotted `name` strings as nested
@@ -436,11 +437,10 @@ export function PerformanceSection(props: Props) {
                 <FormItem>
                   <FormLabel>{t('Disk Cache Threshold (MB)')}</FormLabel>
                   <FormControl>
-                    <Input
-                      type='number'
+                    <NumberInput
                       min={1}
                       step={1}
-                      {...safeNumberFieldProps(field)}
+                      {...numberFieldProps(field)}
                       disabled={!diskEnabled}
                     />
                   </FormControl>
@@ -458,11 +458,10 @@ export function PerformanceSection(props: Props) {
                 <FormItem>
                   <FormLabel>{t('Max Disk Cache Size (MB)')}</FormLabel>
                   <FormControl>
-                    <Input
-                      type='number'
+                    <NumberInput
                       min={100}
                       step={1}
-                      {...safeNumberFieldProps(field)}
+                      {...numberFieldProps(field)}
                       disabled={!diskEnabled}
                     />
                   </FormControl>
@@ -554,11 +553,10 @@ export function PerformanceSection(props: Props) {
                 <FormItem>
                   <FormLabel>{t('CPU Threshold (%)')}</FormLabel>
                   <FormControl>
-                    <Input
-                      type='number'
+                    <NumberInput
                       min={0}
                       step={1}
-                      {...safeNumberFieldProps(field)}
+                      {...numberFieldProps(field)}
                       disabled={!monitorEnabled}
                     />
                   </FormControl>
@@ -573,12 +571,11 @@ export function PerformanceSection(props: Props) {
                 <FormItem>
                   <FormLabel>{t('Memory Threshold (%)')}</FormLabel>
                   <FormControl>
-                    <Input
-                      type='number'
+                    <NumberInput
                       min={0}
                       max={100}
                       step={1}
-                      {...safeNumberFieldProps(field)}
+                      {...numberFieldProps(field)}
                       disabled={!monitorEnabled}
                     />
                   </FormControl>
@@ -593,12 +590,11 @@ export function PerformanceSection(props: Props) {
                 <FormItem>
                   <FormLabel>{t('Disk Threshold (%)')}</FormLabel>
                   <FormControl>
-                    <Input
-                      type='number'
+                    <NumberInput
                       min={0}
                       max={100}
                       step={1}
-                      {...safeNumberFieldProps(field)}
+                      {...numberFieldProps(field)}
                       disabled={!monitorEnabled}
                     />
                   </FormControl>
@@ -646,11 +642,10 @@ export function PerformanceSection(props: Props) {
                 <FormItem>
                   <FormLabel>{t('Flush interval (minutes)')}</FormLabel>
                   <FormControl>
-                    <Input
-                      type='number'
+                    <NumberInput
                       min={1}
                       step={1}
-                      {...safeNumberFieldProps(field)}
+                      {...numberFieldProps(field)}
                       disabled={!perfMetricsEnabled}
                     />
                   </FormControl>
@@ -698,11 +693,10 @@ export function PerformanceSection(props: Props) {
                 <FormItem>
                   <FormLabel>{t('Retention days')}</FormLabel>
                   <FormControl>
-                    <Input
-                      type='number'
+                    <NumberInput
                       min={0}
                       step={1}
-                      {...safeNumberFieldProps(field)}
+                      {...numberFieldProps(field)}
                       disabled={!perfMetricsEnabled}
                     />
                   </FormControl>

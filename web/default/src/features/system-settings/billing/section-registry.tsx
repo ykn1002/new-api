@@ -17,6 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { parseCurrencyDisplayType } from '@/lib/currency'
+import { CreditStrategySection } from '../credit/credit-strategy-section'
+import { RechargeTierSection } from '../credit/recharge-tier-section'
+import { WeChatPaySettingsSection } from '../credit/wechatpay-settings-section'
 import { CheckinSettingsSection } from '../general/checkin-settings-section'
 import { PricingSection } from '../general/pricing-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
@@ -198,6 +201,21 @@ const BILLING_SECTIONS = [
         }}
       />
     ),
+  },
+  {
+    id: 'recharge-tiers',
+    titleKey: 'Recharge Tiers',
+    build: () => <RechargeTierSection />,
+  },
+  {
+    id: 'wechat-pay',
+    titleKey: 'WeChat Pay',
+    build: () => <WeChatPaySettingsSection />,
+  },
+  {
+    id: 'global-strategy',
+    titleKey: 'Global Strategy',
+    build: () => <CreditStrategySection />,
   },
 ] as const
 

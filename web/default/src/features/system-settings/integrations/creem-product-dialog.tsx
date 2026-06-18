@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect } from 'react'
+import { NumberInput } from '@/components/number-input'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -42,7 +43,7 @@ import {
 } from '@/components/ui/select'
 import { Dialog } from '@/components/dialog'
 import type { CreemProduct } from '@/features/wallet/types'
-import { safeNumberFieldProps } from '../utils/numeric-field'
+import { numberFieldProps } from '../utils/numeric-field'
 
 const creemProductDialogSchema = z.object({
   name: z.string().min(1, 'Product name is required'),
@@ -220,12 +221,11 @@ export function CreemProductDialog({
                 <FormItem>
                   <FormLabel>{t('Price')}</FormLabel>
                   <FormControl>
-                    <Input
-                      type='number'
+                    <NumberInput
                       step='0.01'
                       min={0.01}
                       placeholder='10.00'
-                      {...safeNumberFieldProps(field)}
+                      {...numberFieldProps(field)}
                     />
                   </FormControl>
                   <FormMessage />
@@ -241,11 +241,10 @@ export function CreemProductDialog({
               <FormItem>
                 <FormLabel>{t('Quota')}</FormLabel>
                 <FormControl>
-                  <Input
-                    type='number'
+                  <NumberInput
                     min={1}
                     placeholder={t('e.g., 500000')}
-                    {...safeNumberFieldProps(field)}
+                    {...numberFieldProps(field)}
                   />
                 </FormControl>
                 <FormDescription>

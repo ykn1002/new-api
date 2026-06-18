@@ -6,10 +6,24 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
+
+// registerTopupBatch 在充值到账（quota 已加到 User.Quota）后补登一个 topup 积分批次，
+// 维护批次账本的不变量 I。有效期取 credit_setting.topup_default_validity_days。
+// 失败仅记日志，由 ReconcileUserCredit 对账兜底。
+func registerTopupBatch(userId int, quota int, tradeNo string) {
+	if quota <= 0 {
+		return
+	}
+	validity := operation_setting.GetCreditSetting().TopupDefaultValidityDays
+	if err := RegisterTopupCreditBatch(userId, quota, tradeNo, validity); err != nil {
+		common.SysLog(fmt.Sprintf("failed to register topup credit batch (user %d, trade %s): %s", userId, tradeNo, err.Error()))
+	}
+}
 
 type TopUp struct {
 	Id              int     `json:"id"`
@@ -30,6 +44,7 @@ const (
 	PaymentMethodWaffo        = "waffo"
 	PaymentMethodWaffoPancake = "waffo_pancake"
 	PaymentMethodBalance      = "balance"
+	PaymentMethodWeChat       = "wechat"
 )
 
 const (
@@ -39,6 +54,7 @@ const (
 	PaymentProviderWaffo        = "waffo"
 	PaymentProviderWaffoPancake = "waffo_pancake"
 	PaymentProviderBalance      = "balance"
+	PaymentProviderWeChat       = "wechat"
 )
 
 var (
@@ -156,6 +172,7 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(int(quota)), topUp.Amount), callerIp, topUp.PaymentMethod, PaymentMethodStripe)
 
+	registerTopupBatch(topUp.UserId, int(quota), topUp.TradeNo)
 	return nil
 }
 
@@ -387,6 +404,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 
 	// 事务外记录日志，避免阻塞
 	RecordTopupLog(userId, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney), callerIp, paymentMethod, "admin")
+	registerTopupBatch(userId, quotaToAdd, tradeNo)
 	return nil
 }
 func RechargeCreem(referenceId string, customerEmail string, customerName string, callerIp string) (err error) {
@@ -461,6 +479,61 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quota, topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodCreem)
 
+	registerTopupBatch(topUp.UserId, int(quota), topUp.TradeNo)
+	return nil
+}
+
+// RechargeWeChat 微信支付回调到账：校验订单 → 置成功 → 加 quota → 拆批次（基础 topup + 赠送 gift）。
+// tierId 命中档位时按档位拆赠送，否则只入一个 topup 批次。幂等由调用方 LockOrder + pending 单向流转保证。
+func RechargeWeChat(tradeNo string, callerIp string) (err error) {
+	if tradeNo == "" {
+		return errors.New("未提供支付单号")
+	}
+
+	var quota int64
+	topUp := &TopUp{}
+
+	refCol := "`trade_no`"
+	if common.UsingPostgreSQL {
+		refCol = `"trade_no"`
+	}
+
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+			return errors.New("充值订单不存在")
+		}
+		if topUp.PaymentProvider != PaymentProviderWeChat {
+			return ErrPaymentMethodMismatch
+		}
+		if topUp.Status == common.TopUpStatusSuccess {
+			return nil // 幂等：已成功直接返回
+		}
+		if topUp.Status != common.TopUpStatusPending {
+			return errors.New("充值订单状态错误")
+		}
+
+		topUp.CompleteTime = common.GetTimestamp()
+		topUp.Status = common.TopUpStatusSuccess
+		if err := tx.Save(topUp).Error; err != nil {
+			return err
+		}
+
+		quota = topUp.Amount
+		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).
+			Update("quota", gorm.Expr("quota + ?", quota)).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		common.SysError("wechat topup failed: " + err.Error())
+		return errors.New("充值失败，请稍后重试")
+	}
+
+	if topUp.Status == common.TopUpStatusSuccess && quota > 0 {
+		RecordTopupLog(topUp.UserId, fmt.Sprintf("使用微信支付充值成功，充值额度: %v，支付金额：%.2f", quota, topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodWeChat)
+		registerTopupBatch(topUp.UserId, int(quota), topUp.TradeNo)
+	}
 	return nil
 }
 
@@ -522,6 +595,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 
 	if quotaToAdd > 0 {
 		RecordTopupLog(topUp.UserId, fmt.Sprintf("Waffo充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodWaffo)
+		registerTopupBatch(topUp.UserId, quotaToAdd, topUp.TradeNo)
 	}
 
 	return nil
@@ -583,6 +657,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 
 	if quotaToAdd > 0 {
 		RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("Waffo Pancake充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money))
+		registerTopupBatch(topUp.UserId, quotaToAdd, topUp.TradeNo)
 	}
 
 	return nil

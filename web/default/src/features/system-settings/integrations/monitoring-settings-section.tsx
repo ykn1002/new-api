@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo, useRef } from 'react'
+import { NumberInput } from '@/components/number-input'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -44,7 +45,7 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
-import { safeNumberFieldProps } from '../utils/numeric-field'
+import { numberFieldProps } from '../utils/numeric-field'
 
 const numericString = z.string().refine((value) => {
   const trimmed = value.trim()
@@ -286,11 +287,10 @@ export function MonitoringSettingsSection({
                 <FormItem>
                   <FormLabel>{t('Test interval (minutes)')}</FormLabel>
                   <FormControl>
-                    <Input
-                      type='number'
+                    <NumberInput
                       min={1}
                       step={1}
-                      {...safeNumberFieldProps(field)}
+                      {...numberFieldProps(field)}
                     />
                   </FormControl>
                   <FormDescription>

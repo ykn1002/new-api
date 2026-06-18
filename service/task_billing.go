@@ -62,6 +62,8 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
+	// 任务计费的实扣 quota 分摊到积分批次（钱包计费；订阅与异步差额由对账兜底）
+	SettleCreditConsume(c, info, info.PriceData.Quota)
 }
 
 // ---------------------------------------------------------------------------

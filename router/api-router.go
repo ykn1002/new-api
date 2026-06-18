@@ -48,6 +48,7 @@ func SetApiRouter(router *gin.Engine) {
 		// Non-standard OAuth (WeChat, Telegram) - keep original routes
 		apiRouter.GET("/oauth/wechat", middleware.CriticalRateLimit(), controller.WeChatAuth)
 		apiRouter.POST("/oauth/wechat/bind", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.WeChatBind)
+		apiRouter.POST("/wechat/miniprogram/login", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.WeChatMiniProgramLogin)
 		apiRouter.GET("/oauth/telegram/login", middleware.CriticalRateLimit(), controller.TelegramLogin)
 		apiRouter.GET("/oauth/telegram/bind", middleware.CriticalRateLimit(), controller.TelegramBind)
 		// Standard OAuth providers (GitHub, Discord, OIDC, LinuxDO) - unified route
@@ -75,6 +76,7 @@ func SetApiRouter(router *gin.Engine) {
 			userRoute.GET("/logout", controller.Logout)
 			userRoute.POST("/epay/notify", anonymousRequestBodyLimit, controller.EpayNotify)
 			userRoute.GET("/epay/notify", controller.EpayNotify)
+			userRoute.POST("/wechat/pay/notify", anonymousRequestBodyLimit, controller.WeChatPayNotify)
 			userRoute.GET("/groups", controller.GetUserGroups)
 
 			selfRoute := userRoute.Group("/")
@@ -105,6 +107,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/waffo/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPay)
 				selfRoute.POST("/waffo-pancake/amount", controller.RequestWaffoPancakeAmount)
 				selfRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPancakePay)
+				selfRoute.POST("/wechat/pay", middleware.CriticalRateLimit(), controller.RequestWeChatPay)
 				selfRoute.POST("/aff_transfer", controller.TransferAffQuota)
 				selfRoute.PUT("/setting", controller.UpdateUserSetting)
 
@@ -181,6 +184,37 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/subscription/epay/notify", controller.SubscriptionEpayNotify)
 		apiRouter.GET("/subscription/epay/return", controller.SubscriptionEpayReturn)
 		apiRouter.POST("/subscription/epay/return", anonymousRequestBodyLimit, controller.SubscriptionEpayReturn)
+
+		// 积分账本（Token Plan）
+		creditRoute := apiRouter.Group("/credit")
+		creditRoute.Use(middleware.UserAuth())
+		{
+			creditRoute.GET("/batches", controller.GetCreditBatches)
+		}
+		// 流量池总览 + 导出（运营看板）
+		adminCreditRoute := apiRouter.Group("/admin/credit")
+		adminCreditRoute.Use(middleware.AdminAuth())
+		{
+			adminCreditRoute.GET("/overview", controller.GetCreditOverview)
+			adminCreditRoute.GET("/export", controller.ExportCreditData)
+			adminCreditRoute.GET("/user-stats", controller.GetUserCreditStats)
+		}
+		// 充值档位 / 模型价格定时生效（仅超管）
+		rechargeTierRoute := apiRouter.Group("/admin/recharge-tier")
+		rechargeTierRoute.Use(middleware.RootAuth())
+		{
+			rechargeTierRoute.GET("/", controller.ListRechargeTiers)
+			rechargeTierRoute.POST("/", controller.SaveRechargeTier)
+			rechargeTierRoute.DELETE("/:id", controller.DeleteRechargeTier)
+		}
+		modelPriceScheduleRoute := apiRouter.Group("/admin/model-price-schedule")
+		modelPriceScheduleRoute.Use(middleware.RootAuth())
+		{
+			modelPriceScheduleRoute.GET("/", controller.ListModelPriceSchedules)
+			modelPriceScheduleRoute.POST("/", controller.CreateModelPriceSchedule)
+			modelPriceScheduleRoute.DELETE("/:id", controller.DeleteModelPriceSchedule)
+		}
+
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())
 		{

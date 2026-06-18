@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Activity, BarChart3, WalletCards } from 'lucide-react'
+import { Activity, AlertTriangle, BarChart3, WalletCards } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatQuota } from '@/lib/format'
+import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { UserWalletData } from '../types'
 
@@ -68,6 +69,24 @@ export function WalletStatsCard(props: WalletStatsCardProps) {
 
   return (
     <div className='overflow-hidden rounded-lg border'>
+      {(props.user?.current_plan || props.user?.low_balance) && (
+        <div className='flex flex-wrap items-center gap-2 border-b px-3 py-2 sm:px-5'>
+          {props.user?.current_plan ? (
+            <Badge variant='secondary'>
+              {t('Current plan')}: {props.user.current_plan}
+            </Badge>
+          ) : null}
+          {props.user?.low_balance ? (
+            <Badge
+              variant='outline'
+              className='border-warning/40 text-warning gap-1'
+            >
+              <AlertTriangle className='size-3' />
+              {t('Low balance, please top up')}
+            </Badge>
+          ) : null}
+        </div>
+      )}
       <div className='divide-border/60 grid grid-cols-3 divide-x'>
         {stats.map((item) => (
           <div key={item.label} className='px-3 py-3 sm:px-5 sm:py-4'>
