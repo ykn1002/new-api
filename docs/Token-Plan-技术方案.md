@@ -99,7 +99,7 @@ type CreditBatch struct {
 
 > **并发**：单用户加/扣/过期对批次的写操作需串行化。沿用现有「单用户额度操作」并发模型——批次分摊在持有用户额度更新点时进行，或对 `user_id` 做行级 `SELECT ... FOR UPDATE`（三库均支持；SQLite 串行写天然安全）。
 
-### 2.3 充值档位扩展（缺口 B-3）
+### 2.3 充值档位扩展（缺口 A-3）
 
 现状 `PaymentSetting{ AmountOptions []int; AmountDiscount map[int]float64 }`（`setting/operation_setting/payment_setting.go`）只有「金额 + 折扣」，**无档位名称 / 固定赠送积分 / 有效期**。新增结构化档位（存为 JSON option，三库以 TEXT 存储）：
 
@@ -139,12 +139,21 @@ type ModelPriceSchedule struct {
 - 定时任务（与到期清零同一调度器）扫描 `EffectiveAt<=now && !applied`，调现有 `UpdateModelRatioByJSONString` / `UpdateCompletionRatioByJSONString`（`setting/ratio_setting/model_ratio.go:397/445`）落地，标记 `applied`。
 - 与「待确认第 7 条（调价不回算存量）」正交：到点切换只影响后续请求，不回溯。
 
-### 2.5 流水补字段（缺口 B-10）
+### 2.5 流水补字段（缺口 B-12）
 
 现状 `Log`（`model/log.go:34-56`）**无 `source`、无 `balance_after`**，但有 `Other string`(JSON) 与类型常量 `LogTypeTopup=1 / Consume=2 / Manage=3 / Refund=6`（`model/log.go:59`）。方案流水表要「来源 + 操作后余额 + 过期类型」。两种落地，本方案选 **(a)**：
 
 - **(a) 加两列（推荐）**：`Log` 增 `CreditSource string`（gift/subscription/topup）与 `BalanceAfter int`。SQLite 用 `ALTER TABLE ADD COLUMN`（`model/main.go` 既有模式），三库均 `ADD COLUMN` 安全。新增「过期」语义复用 `LogTypeManage` 或新增 `LogTypeExpire=8`。
 - (b) 全塞 `Other` JSON：零迁移，但查询/筛选不便、无法走索引。仅作降级备选。
+
+### 2.6 批次派生查询（来源占比 / 即将过期 / 用户分类）
+
+以下读能力全部由 `CreditBatch` 派生，无需额外存储，集中在 `model/credit_batch.go` 提供查询函数：
+
+- **来源占比**（缺口 A-2 / image7 三卡片）：`SELECT source, SUM(remaining) FROM credit_batch WHERE user_id=? AND status=1 GROUP BY source`，得赠送/套餐/充值三类余额，前端算占比与堆叠条。
+- **即将过期提示**（缺口 A-8 / image7「2,000 将于 06-30 过期」）：取该用户「最近一笔将到期且 remaining>0」批次：`WHERE user_id=? AND status=1 AND expire_at>0 ORDER BY expire_at ASC LIMIT 1`，返回 `{remaining, expire_at}`。`/api/user/self` 与 `/api/credit/batches` 携带该字段，小程序/后台据此提示。
+- **有效期展示**：各来源卡片的「有效期至」取该来源下最近到期批次的 `expire_at`（永久批次显示「长期有效」）。
+- **用户列表状态分类**（缺口 B-16 / image5「全部/正常/低余额/已用尽」）：分类口径由 `User.Quota` + 百分比阈值（见 3.4）派生——`Quota=0`→已用尽；`剩余/基准 < 阈值%`→低余额；其余→正常。运营列表分类计数走一次按区间的 `COUNT`（或先取 `Quota` 再内存归类），KPI（总用户数、积分余额合计、本月消耗、低余额用户数）由 `User` 聚合 + `QuotaData` 周期聚合得出。
 
 ## 3. 关键流程设计
 
@@ -174,7 +183,7 @@ func CreditUserQuota(g CreditGrant) error {
 
 接入点：
 - **充值到账**：`controller/topup.go` 各回调（Stripe/Creem/微信等）与 `ManualCompleteTopUp`（`model/topup.go:319`）改为调 `CreditUserQuota`，按命中档位拆「基础(topup)+赠送(gift)」两次入账。
-- **运营代充/赠送**：`controller/user.go` 的 `ManageUser` `add_quota`（`controller/user.go:996`）改走 `CreditUserQuota`，`OperatorId`=当前管理员，已有审计日志保留。
+- **运营代充/赠送（按档位，缺口 B-17 / image6）**：`controller/user.go` 的 `ManageUser` `add_quota`（`controller/user.go:996`）改走 `CreditUserQuota`。现状按「额度数值」代充，改为 image6 的「**选择充值档位（¥100/¥500/¥1000/自定义）+ 额外赠送 + 原因备注**」：选档位则按档位的基础/赠送/有效期入账（基础入 `topup`、赠送入 `gift` 批次），自定义则手填积分数；`OperatorId`=当前管理员、`Reason`=备注，复用现有审计日志。
 - **套餐发放**：`AdminBindSubscription`（`model/subscription.go:657`）与周期重置发放积分时入 `subscription` 批次（有效期=套餐周期）。
 
 ### 3.2 模型调用与扣减（对应方案 4.2）
@@ -225,7 +234,7 @@ CreditUserQuota（基础积分→topup批次；赠送积分→gift批次）
 订单关闭，余额不变（现状已具备）
 ```
 
-### 3.4 余额预警（对应方案 4.3，缺口 B-13）
+### 3.4 余额预警（对应方案 4.3，缺口 B-15）
 
 现状预警阈值是**绝对值**（`QuotaRemindThreshold=1000`，`common/constants.go:150`；用户级 `QuotaWarningThreshold`），方案要**百分比（剩余<20%，可配）**，且要「**同时通知运营**」。
 
@@ -251,6 +260,14 @@ CreditUserQuota（基础积分→topup批次；赠送积分→gift批次）
   2. `ApplyDueModelPriceSchedules`：见 2.4。
   3. （可选）`ReconcileUserCredit` 抽样对账。
 - 大批量过期需分页 + 限流，避免一次性长事务锁表（三库友好）。
+
+### 3.7 当前套餐展示（缺口 B-19 / 需求 3、4）
+
+image5/image7/image11 多处展示用户「当前套餐名」（标准套餐/季度套餐/年度套餐/体验套餐）。本期**展示但不开放用户付费购买**（套餐由运营配置/发放，订阅系统现成）。
+
+- **数据来源**：`UserSubscription`（`model/subscription.go`，status=active 且在有效期内的记录）关联 `SubscriptionPlan.Title`，取当前生效套餐名。无生效套餐则展示「无」/空。
+- **接口**：`/api/user/self` 补 `current_plan` 字段；运营列表/详情同源。数据层已具备，仅前端取数渲染。
+- **与套餐积分批次关系**：套餐发放的积分入 `subscription` 批次（见 3.1），套餐名展示与积分来源分账由此打通——image7「套餐积分 22,000，随套餐周期 2025-07-12 清零」即对应 `subscription` 批次的 `remaining` 与 `expire_at`。
 
 ## 4. 小程序登录、账号映射与微信支付
 
@@ -298,7 +315,7 @@ controller/topup_wechat.go（新建）
 - **幂等**：复用现有 `LockOrder` + 订单 `status=pending` 单向流转，重复回调安全。
 - **接口复用**：登录(4.1)、余额(`/api/user/self`)、档位(`GetTopUpInfo`，`controller/topup.go:24`)、明细(日志查询) 均复用现成接口，小程序端无需后端新增 UI 逻辑（小程序 UI 已自建）。
 
-### 4.3 汇率与「人民币≡美元」配置（缺口 B-8，需求 2）
+### 4.3 汇率与「人民币≡美元」配置（缺口 B-10，需求 2）
 
 采用覆盖分析推荐的简化口径（不使用内置美元支付渠道时）：
 
@@ -317,9 +334,17 @@ controller/topup_wechat.go（新建）
 
 > **注意**：① 关闭/不用内置美元支付渠道（它们走 `Price=7.3`）；② 内置默认模型倍率按上游美元成本调的，基准当人民币后须按自有产品重配（本就要做）；③ 统一用 CUSTOM(积分) 展示，不用 USD 展示类型。
 
-### 4.4 配置权限收紧（缺口 B-12）
+### 4.4 配置权限收紧（缺口 B-14）
 
 汇率/`QuotaPerUnit`/默认模型属系统级，限「研发/超管」（`RoleRootUser`）可改。在对应 option 写接口加角色校验；运营后台只读展示。
+
+### 4.5 统一设置页（缺口 B-18 / image8）
+
+方案 image8 要求「把规则、预警、各种配置放在一个统一设置的地方」（如全局额度与计费规则、余额预警阈值 20%）。后端这些配置项分散在不同 option（预警阈值、汇率、默认模型、档位、有效期默认值等），本期**不强行合并后端存储**，而是：
+
+- 后端：补齐缺失配置项（百分比预警阈值、赠送默认有效期等），统一经 `Option` 表存取，读写接口归并到一个「全局策略」分组返回。
+- 前端：新增一个「全局策略 / 计费设置」页，聚合展示与编辑上述项；写操作按 4.4 做角色校验。
+- 属前端组织 + 少量后端配置项补齐，无数据模型改动。
 
 ## 5. 运营看板与导出（需求 5）
 
@@ -327,7 +352,7 @@ controller/topup_wechat.go（新建）
 
 现状已具备（覆盖分析 C 类，已核对）：多维统计 `model/usedata.go`（`GetAllQuotaDates`/`GetQuotaDataByUserId`/`GetQuotaDataGroupByUser`，按用户/模型/时间聚合）、排行 `model/usedata_rankings.go`、`controller/rankings.go`。需补：
 
-### 5.1 总览聚合（缺口 B-11）
+### 5.1 总览聚合（缺口 B-13）
 
 - 新增聚合接口返回方案 image14 所需卡片：总 Token 消耗、总积分消耗（`QuotaData.Quota` 按汇率换算为积分）、成本估算、累计充值金额、用户总数/活跃数。
 - **累计充值金额**：`SUM(TopUp.Money where status=success)`，按时间筛选。
@@ -382,7 +407,7 @@ controller/topup_wechat.go（新建）
 
 | 里程碑 | 范围 | 主要缺口 | 依赖 |
 |---|---|---|---|
-| **M1 配置基线** | 启用「积分」自定义货币、人民币≡美元汇率、取整到 2 位小数（结算实扣，见 3.2）、汇率权限收紧 | B-10/B-11/B-14 | 无 |
+| **M1 配置基线** | 启用「积分」自定义货币、人民币≡美元汇率、取整到 2 位小数（结算实扣，见 3.2）、汇率权限收紧、统一设置页聚合 | B-10/B-11/B-14/B-18 | 无 |
 | **M2 积分批次账本** | `CreditBatch` 表 + `CreditUserQuota` 统一入口 + `SettleConsumeToBatches` 分摊 + 对账 + 老数据回填 | A-1/A-2 | M1 |
 | **M3 有效期与流水** | 到期清零定时任务、顺延、`Log` 补 source/balance_after、过期类型、明细筛选、即将过期提示 | A-1/A-8/B-12 | M2 |
 | **M4 充值档位** | 档位结构扩展（名称/基础/赠送/有效期/上下架）+ 后台 CRUD + 到账拆批次 + 代充值按档位 | A-3/B-17 | M2 |
