@@ -39,8 +39,8 @@ func manageAddQuotaByTier(c *gin.Context, userId int, req ManageRequest) error {
 	operatorId := c.GetInt("id")
 	reason := manageReasonOrDefault(req.Reason, "管理员按档位代充："+tier.Name)
 
-	// 1) 基础积分（topup 批次）
-	baseQuota := creditUnitsToQuota(tier.BaseCredits)
+	// 1) 基础积分（topup 批次）：以档位金额（元）为基准，未显式覆写则由汇率派生
+	baseQuota := creditUnitsToQuota(tier.EffectiveBaseCredits())
 	if baseQuota > 0 {
 		if err := model.CreditUserQuota(model.CreditGrant{
 			UserId:       userId,
@@ -173,11 +173,35 @@ func DeleteRechargeTier(c *gin.Context) {
 // 模型价格定时生效计划 CRUD（缺口 A-7）— 仅超管
 // ---------------------------------------------------------------------------
 
+type modelPriceSchedulePayload struct {
+	Name                 string `json:"name"`
+	BillingMode          string `json:"billingMode"`
+	Price                string `json:"price"`
+	Ratio                string `json:"ratio"`
+	CacheRatio           string `json:"cacheRatio"`
+	CreateCacheRatio     string `json:"createCacheRatio"`
+	CompletionRatio      string `json:"completionRatio"`
+	ImageRatio           string `json:"imageRatio"`
+	AudioRatio           string `json:"audioRatio"`
+	AudioCompletionRatio string `json:"audioCompletionRatio"`
+	BillingExpr          string `json:"billingExpr"`
+	RequestRuleExpr      string `json:"requestRuleExpr"`
+}
+
+// hasAnyPrice 判断价格快照是否至少配置了一个有效价格字段。
+func (p modelPriceSchedulePayload) hasAnyPrice() bool {
+	return p.Price != "" || p.Ratio != "" || p.CacheRatio != "" ||
+		p.CreateCacheRatio != "" || p.CompletionRatio != "" || p.ImageRatio != "" ||
+		p.AudioRatio != "" || p.AudioCompletionRatio != "" || p.BillingExpr != ""
+}
+
 type modelPriceScheduleRequest struct {
-	ModelName       string  `json:"model_name"`
+	ModelName   string                     `json:"model_name"`
+	Payload     *modelPriceSchedulePayload `json:"payload"`
+	EffectiveAt int64                      `json:"effective_at"`
+	// 旧版字段，保留以兼容旧前端调用。
 	ModelRatio      float64 `json:"model_ratio"`
 	CompletionRatio float64 `json:"completion_ratio"`
-	EffectiveAt     int64   `json:"effective_at"`
 }
 
 // ListModelPriceSchedules 列出价格计划，query applied=true/false 过滤。
@@ -202,25 +226,53 @@ func CreateModelPriceSchedule(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if req.ModelName == "" {
-		common.ApiErrorMsg(c, "模型名称不能为空")
-		return
-	}
-	if req.ModelRatio <= 0 && req.CompletionRatio <= 0 {
-		common.ApiErrorMsg(c, "至少配置模型倍率或补全倍率之一")
-		return
-	}
 	if req.EffectiveAt <= common.GetTimestamp() {
 		common.ApiErrorMsg(c, "生效时间必须晚于当前时间")
 		return
 	}
+
 	s := &model.ModelPriceSchedule{
-		ModelName:       req.ModelName,
-		ModelRatio:      req.ModelRatio,
-		CompletionRatio: req.CompletionRatio,
-		EffectiveAt:     req.EffectiveAt,
-		OperatorId:      c.GetInt("id"),
+		EffectiveAt: req.EffectiveAt,
+		OperatorId:  c.GetInt("id"),
 	}
+
+	if req.Payload != nil {
+		// 新版：存价格表单完整快照
+		modelName := req.ModelName
+		if modelName == "" {
+			modelName = req.Payload.Name
+		}
+		if modelName == "" {
+			common.ApiErrorMsg(c, "模型名称不能为空")
+			return
+		}
+		if !req.Payload.hasAnyPrice() {
+			common.ApiErrorMsg(c, "至少配置一项价格")
+			return
+		}
+		req.Payload.Name = modelName
+		payloadJSON, err := common.Marshal(req.Payload)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		s.ModelName = modelName
+		s.Payload = string(payloadJSON)
+	} else {
+		// 旧版兼容：填倍率
+		if req.ModelName == "" {
+			common.ApiErrorMsg(c, "模型名称不能为空")
+			return
+		}
+		if req.ModelRatio <= 0 && req.CompletionRatio <= 0 {
+			common.ApiErrorMsg(c, "至少配置模型倍率或补全倍率之一")
+			return
+		}
+		s.ModelName = req.ModelName
+		s.ModelRatio = req.ModelRatio
+		s.CompletionRatio = req.CompletionRatio
+	}
+
 	if err := s.Insert(); err != nil {
 		common.ApiError(c, err)
 		return

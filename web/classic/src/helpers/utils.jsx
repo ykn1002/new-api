@@ -687,20 +687,21 @@ export const calculateModelPrice = ({
       };
     }
 
-    let symbol = '$';
+    let symbol = '积分';
     if (currency === 'CNY') {
       symbol = '¥';
-    } else if (currency === 'CUSTOM') {
+    } else {
+      // CUSTOM（积分），历史 USD 配置一并回退至此
       try {
         const statusStr = localStorage.getItem('status');
         if (statusStr) {
           const s = JSON.parse(statusStr);
-          symbol = s?.custom_currency_symbol || '¤';
+          symbol = s?.custom_currency_symbol || '积分';
         } else {
-          symbol = '¤';
+          symbol = '积分';
         }
       } catch (e) {
-        symbol = '¤';
+        symbol = '积分';
       }
     }
 
@@ -900,16 +901,18 @@ export const getModelPriceItems = (
 export const formatDynamicPriceSummary = (billingExpr, t, groupRatio = 1) => {
   if (!billingExpr) return <span style={{ color: 'var(--semi-color-text-1)' }}>{t('动态计费')}</span>;
 
-  const quotaDisplayType = localStorage.getItem('quota_display_type') || 'USD';
-  let symbol = '$';
+  const quotaDisplayType =
+    localStorage.getItem('quota_display_type') || 'CUSTOM';
+  let symbol = '积分';
   let rate = 1;
   try {
     const s = JSON.parse(localStorage.getItem('status') || '{}');
     if (quotaDisplayType === 'CNY') {
       symbol = '¥';
-      rate = s?.usd_exchange_rate || 7;
-    } else if (quotaDisplayType === 'CUSTOM') {
-      symbol = s?.custom_currency_symbol || '¤';
+      rate = s?.usd_exchange_rate || 1;
+    } else if (quotaDisplayType !== 'TOKENS') {
+      // CUSTOM（积分），历史 USD 配置一并回退至此
+      symbol = s?.custom_currency_symbol || '积分';
       rate = s?.custom_currency_exchange_rate || 1;
     }
   } catch (e) {}
@@ -1056,7 +1059,7 @@ export const createCardProPagination = ({
 const DEFAULT_PRICING_FILTERS = {
   search: '',
   showWithRecharge: false,
-  currency: 'USD',
+  currency: 'CUSTOM',
   showRatio: false,
   viewMode: 'card',
   tokenUnit: 'M',

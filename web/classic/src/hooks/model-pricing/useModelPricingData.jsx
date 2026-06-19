@@ -41,7 +41,7 @@ export const useModelPricingData = () => {
   const [filterTag, setFilterTag] = useState('all'); // 模型标签筛选: 'all' | string
   const [pageSize, setPageSize] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
-  const [currency, setCurrency] = useState('USD');
+  const [currency, setCurrency] = useState('CUSTOM');
   const [showWithRecharge, setShowWithRecharge] = useState(false);
   const [tokenUnit, setTokenUnit] = useState('M');
   const [models, setModels] = useState([]);
@@ -74,16 +74,12 @@ export const useModelPricingData = () => {
   );
 
   // 默认货币与站点展示类型同步；TOKENS 由视图层走倍率展示
-  const siteDisplayType = useMemo(
-    () => statusState?.status?.quota_display_type || 'USD',
-    [statusState],
-  );
+  const siteDisplayType = useMemo(() => {
+    const t = statusState?.status?.quota_display_type || 'CUSTOM';
+    return t === 'USD' ? 'CUSTOM' : t; // 人民币锚定：历史 USD 归一到积分
+  }, [statusState]);
   useEffect(() => {
-    if (
-      siteDisplayType === 'USD' ||
-      siteDisplayType === 'CNY' ||
-      siteDisplayType === 'CUSTOM'
-    ) {
+    if (siteDisplayType === 'CNY' || siteDisplayType === 'CUSTOM') {
       setCurrency(siteDisplayType);
     }
   }, [siteDisplayType]);
@@ -91,7 +87,7 @@ export const useModelPricingData = () => {
   useEffect(() => {
     if (siteDisplayType === 'TOKENS') {
       setShowWithRecharge(false);
-      setCurrency('USD');
+      setCurrency('CUSTOM');
     }
   }, [siteDisplayType]);
 
@@ -186,10 +182,9 @@ export const useModelPricingData = () => {
 
     if (currency === 'CNY') {
       return `¥${(priceInUSD * usdExchangeRate).toFixed(3)}`;
-    } else if (currency === 'CUSTOM') {
-      return `${customCurrencySymbol}${(priceInUSD * customExchangeRate).toFixed(3)}`;
     }
-    return `$${priceInUSD.toFixed(3)}`;
+    // CUSTOM（积分），历史 USD 配置一并回退至此
+    return `${customCurrencySymbol}${(priceInUSD * customExchangeRate).toFixed(3)}`;
   };
 
   const setModelsFormat = (models, groupRatio, vendorMap) => {

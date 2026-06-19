@@ -64,7 +64,7 @@ const createPricingSchema = (t: (key: string) => string) =>
       DisplayInCurrencyEnabled: z.boolean(),
       DisplayTokenStatEnabled: z.boolean(),
       general_setting: z.object({
-        quota_display_type: z.enum(['USD', 'CNY', 'TOKENS', 'CUSTOM']),
+        quota_display_type: z.enum(['CNY', 'TOKENS', 'CUSTOM']),
         custom_currency_symbol: z.string().max(8).optional(),
         custom_currency_exchange_rate: z.coerce
           .number()
@@ -135,7 +135,8 @@ export function PricingSection({ defaultValues }: PricingSectionProps) {
       },
     })
 
-  const displayType = form.watch('general_setting.quota_display_type') ?? 'USD'
+  const displayType =
+    form.watch('general_setting.quota_display_type') ?? 'CUSTOM'
   const displayInCurrencyEnabled = form.watch('DisplayInCurrencyEnabled')
   const showTokensOnlyOption = displayType === 'TOKENS'
   const showQuotaPerUnit =
@@ -192,7 +193,6 @@ export function PricingSection({ defaultValues }: PricingSectionProps) {
                   <FormLabel>{t('Display Mode')}</FormLabel>
                   <Select
                     items={[
-                      { value: 'USD', label: t('USD') },
                       { value: 'CNY', label: t('CNY') },
                       { value: 'CUSTOM', label: t('Custom Currency') },
                       { value: 'TOKENS', label: t('Tokens Only') },
@@ -207,7 +207,6 @@ export function PricingSection({ defaultValues }: PricingSectionProps) {
                     </FormControl>
                     <SelectContent alignItemWithTrigger={false}>
                       <SelectGroup>
-                        <SelectItem value='USD'>{t('USD')}</SelectItem>
                         <SelectItem value='CNY'>{t('CNY')}</SelectItem>
                         <SelectItem value='CUSTOM'>
                           {t('Custom Currency')}
@@ -228,19 +227,13 @@ export function PricingSection({ defaultValues }: PricingSectionProps) {
               )}
             />
 
-            {displayType !== 'TOKENS' && (
+            {displayType === 'CNY' && (
               <FormField
                 control={form.control}
                 name='USDExchangeRate'
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>
-                      {displayType === 'CNY'
-                        ? t('CNY per USD')
-                        : displayType === 'USD'
-                          ? t('USD Exchange Rate')
-                          : t('USD Exchange Rate')}
-                    </FormLabel>
+                    <FormLabel>{t('Currency Display Rate')}</FormLabel>
                     <FormControl>
                       <NumberInput
                         step='0.01'
@@ -249,7 +242,7 @@ export function PricingSection({ defaultValues }: PricingSectionProps) {
                     </FormControl>
                     <FormDescription>
                       {t(
-                        'Real exchange rate between USD and your payment gateway currency'
+                        'Display multiplier applied to the base currency (keep 1 for direct CNY pricing)'
                       )}
                     </FormDescription>
                     <FormMessage />
@@ -290,7 +283,7 @@ export function PricingSection({ defaultValues }: PricingSectionProps) {
                   name='general_setting.custom_currency_exchange_rate'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Units per USD')}</FormLabel>
+                      <FormLabel>{t('Units per CNY')}</FormLabel>
                       <FormControl>
                         <Input
                           type='number'
@@ -306,11 +299,11 @@ export function PricingSection({ defaultValues }: PricingSectionProps) {
                           name={field.name}
                           onBlur={field.onBlur}
                           ref={field.ref}
-                          placeholder={t('e.g. 8 means 1 USD = 8 units')}
+                          placeholder={t('e.g. 100 means 1 CNY = 100 units')}
                         />
                       </FormControl>
                       <FormDescription>
-                        {t('Conversion rate from USD to your custom currency')}
+                        {t('Conversion rate from CNY to your custom currency')}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

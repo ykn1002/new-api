@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 
 type AccentTone = 'emerald' | 'amber' | 'blue' | 'violet'
 
@@ -302,7 +303,10 @@ export function HeroTerminalDemo(props: HeroTerminalDemoProps) {
             <span className='flex items-center gap-1'>
               <span className='tracking-wider uppercase'>cost</span>
               <span className='font-mono'>
-                ${(demo.tokens * 0.00003).toFixed(5)}
+                {formatBillingCurrencyFromUSD(demo.tokens * 0.00003, {
+                  digitsLarge: 5,
+                  digitsSmall: 5,
+                })}
               </span>
             </span>
           </div>

@@ -76,6 +76,7 @@ import {
   getOptionValue,
 } from '@/features/system-settings/hooks/use-system-options'
 import { useUpdateOption } from '@/features/system-settings/hooks/use-update-option'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { normalizeJsonString } from '@/features/system-settings/models/utils'
 import type { ModelSettings } from '@/features/system-settings/types'
 import { safeJsonParse } from '@/features/system-settings/utils/json-parser'
@@ -1002,7 +1003,7 @@ export function ModelMutateDrawer({
                             </FormControl>
                             <FormDescription>
                               {field.value && !isNaN(parseFloat(field.value))
-                                ? `Calculated price: $${(parseFloat(field.value) * 2).toFixed(4)} per 1M tokens`
+                                ? `${t('Calculated price')}: ${formatBillingCurrencyFromUSD(parseFloat(field.value) * 2, { digitsLarge: 4, digitsSmall: 4 })} / 1M tokens`
                                 : t('Multiplier for prompt tokens.')}
                             </FormDescription>
                             <FormMessage />
@@ -1044,7 +1045,7 @@ export function ModelMutateDrawer({
                               !isNaN(parseFloat(field.value)) &&
                               promptPrice &&
                               !isNaN(parseFloat(promptPrice))
-                                ? `Calculated price: $${(parseFloat(promptPrice) * parseFloat(field.value)).toFixed(4)} per 1M tokens`
+                                ? `${t('Calculated price')}: ${formatBillingCurrencyFromUSD(parseFloat(promptPrice) * parseFloat(field.value), { digitsLarge: 4, digitsSmall: 4 })} / 1M tokens`
                                 : t('Multiplier for completion tokens.')}
                             </FormDescription>
                             <FormMessage />

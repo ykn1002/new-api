@@ -135,9 +135,11 @@ export function isCurrencyDisplayType(
 
 export function parseCurrencyDisplayType(
   value: unknown,
-  fallback: CurrencyDisplayType = 'USD'
-): CurrencyDisplayType {
-  return isCurrencyDisplayType(value) ? value : fallback
+  fallback: Exclude<CurrencyDisplayType, 'USD'> = 'CUSTOM'
+): Exclude<CurrencyDisplayType, 'USD'> {
+  // 人民币锚定：历史 USD 配置一律归一到积分（CUSTOM）
+  if (value === 'USD') return 'CUSTOM'
+  return isCurrencyDisplayType(value) && value !== 'USD' ? value : fallback
 }
 
 function getConfig(): CurrencyConfig {
@@ -174,24 +176,18 @@ function getDisplayMeta(config: CurrencyConfig): DisplayMeta {
         currencyCode: 'CNY',
         exchangeRate: config.usdExchangeRate,
       }
-    case 'CUSTOM':
-      return {
-        kind: 'custom',
-        symbol: config.customCurrencySymbol,
-        exchangeRate: config.customCurrencyExchangeRate,
-      }
     case 'TOKENS':
       return {
         kind: 'tokens',
         quotaPerUnit: config.quotaPerUnit,
       }
-    case 'USD':
+    case 'CUSTOM':
     default:
+      // 人民币锚定：默认即积分（CUSTOM），历史 USD 配置一并回退至此
       return {
-        kind: 'currency',
-        symbol: '$',
-        currencyCode: 'USD',
-        exchangeRate: 1,
+        kind: 'custom',
+        symbol: config.customCurrencySymbol,
+        exchangeRate: config.customCurrencyExchangeRate,
       }
   }
 }
@@ -199,11 +195,11 @@ function getDisplayMeta(config: CurrencyConfig): DisplayMeta {
 function getBillingDisplayMeta(config: CurrencyConfig): DisplayMeta {
   const meta = getDisplayMeta(config)
   if (meta.kind === 'tokens') {
+    // 计费/价格不展示 token，回退到积分口径
     return {
-      kind: 'currency',
-      symbol: '$',
-      currencyCode: 'USD',
-      exchangeRate: 1,
+      kind: 'custom',
+      symbol: config.customCurrencySymbol,
+      exchangeRate: config.customCurrencyExchangeRate,
     }
   }
   return meta

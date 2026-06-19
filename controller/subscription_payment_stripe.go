@@ -21,6 +21,10 @@ type SubscriptionStripePayRequest struct {
 }
 
 func SubscriptionRequestStripePay(c *gin.Context) {
+	if !enableForeignCurrencyTopUp {
+		common.ApiErrorMsg(c, "外币支付已停用")
+		return
+	}
 	if !requirePaymentCompliance(c) {
 		return
 	}

@@ -95,9 +95,9 @@ const BILLING_SECTIONS = [
               settings['general_setting.quota_display_type']
             ),
             custom_currency_symbol:
-              settings['general_setting.custom_currency_symbol'] ?? '¤',
+              settings['general_setting.custom_currency_symbol'] ?? '积分',
             custom_currency_exchange_rate:
-              settings['general_setting.custom_currency_exchange_rate'] ?? 1,
+              settings['general_setting.custom_currency_exchange_rate'] ?? 100,
           },
         }}
       />

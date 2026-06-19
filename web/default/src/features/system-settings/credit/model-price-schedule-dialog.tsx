@@ -24,6 +24,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog } from '@/components/dialog'
+import {
+  ModelPricingEditorPanel,
+  type ModelPricingEditorPanelHandle,
+  type ModelRatioData,
+} from '@/features/system-settings/models/model-pricing-sheet'
 import { createModelPriceSchedule } from './api'
 
 interface ModelPriceScheduleDialogProps {
@@ -40,9 +45,7 @@ export function ModelPriceScheduleDialog(props: ModelPriceScheduleDialogProps) {
 function ModelPriceScheduleDialogInner(props: ModelPriceScheduleDialogProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const [modelName, setModelName] = React.useState('')
-  const [modelRatio, setModelRatio] = React.useState('')
-  const [completionRatio, setCompletionRatio] = React.useState('')
+  const panelRef = React.useRef<ModelPricingEditorPanelHandle>(null)
   const [effectiveAt, setEffectiveAt] = React.useState('')
 
   const mutation = useMutation({
@@ -54,17 +57,7 @@ function ModelPriceScheduleDialogInner(props: ModelPriceScheduleDialogProps) {
     },
   })
 
-  const handleSubmit = () => {
-    if (!modelName.trim()) {
-      toast.error(t('Model name is required'))
-      return
-    }
-    const mr = Number(modelRatio) || 0
-    const cr = Number(completionRatio) || 0
-    if (mr <= 0 && cr <= 0) {
-      toast.error(t('Configure at least one of model ratio or completion ratio'))
-      return
-    }
+  const handleSubmit = async () => {
     if (!effectiveAt) {
       toast.error(t('Effective time is required'))
       return
@@ -74,10 +67,29 @@ function ModelPriceScheduleDialogInner(props: ModelPriceScheduleDialogProps) {
       toast.error(t('Effective time must be in the future'))
       return
     }
+    const data: ModelRatioData | null =
+      (await panelRef.current?.commitDraft()) ?? null
+    if (!data) {
+      // 价格表单校验失败：字段上已显示错误，再给一条整体提示
+      toast.error(t('Please complete the model pricing form'))
+      return
+    }
     mutation.mutate({
-      model_name: modelName.trim(),
-      model_ratio: mr,
-      completion_ratio: cr,
+      model_name: data.name,
+      payload: {
+        name: data.name,
+        billingMode: data.billingMode ?? 'per-token',
+        price: data.price ?? '',
+        ratio: data.ratio ?? '',
+        cacheRatio: data.cacheRatio ?? '',
+        createCacheRatio: data.createCacheRatio ?? '',
+        completionRatio: data.completionRatio ?? '',
+        imageRatio: data.imageRatio ?? '',
+        audioRatio: data.audioRatio ?? '',
+        audioCompletionRatio: data.audioCompletionRatio ?? '',
+        billingExpr: data.billingExpr ?? '',
+        requestRuleExpr: data.requestRuleExpr ?? '',
+      },
       effective_at: ts,
     })
   }
@@ -87,6 +99,7 @@ function ModelPriceScheduleDialogInner(props: ModelPriceScheduleDialogProps) {
       open={props.open}
       onOpenChange={props.onOpenChange}
       title={t('Add Schedule')}
+      contentClassName='sm:max-w-2xl xl:max-w-5xl'
       footer={
         <div className='flex justify-end gap-2'>
           <Button variant='outline' onClick={() => props.onOpenChange(false)}>
@@ -100,32 +113,6 @@ function ModelPriceScheduleDialogInner(props: ModelPriceScheduleDialogProps) {
     >
       <div className='grid gap-4'>
         <div className='grid gap-2'>
-          <Label>{t('Model Name')}</Label>
-          <Input
-            value={modelName}
-            onChange={(e) => setModelName(e.target.value)}
-            placeholder='gpt-4o'
-          />
-        </div>
-        <div className='grid grid-cols-2 gap-4'>
-          <div className='grid gap-2'>
-            <Label>{t('Model ratio')}</Label>
-            <Input
-              type='number'
-              value={modelRatio}
-              onChange={(e) => setModelRatio(e.target.value)}
-            />
-          </div>
-          <div className='grid gap-2'>
-            <Label>{t('Completion ratio')}</Label>
-            <Input
-              type='number'
-              value={completionRatio}
-              onChange={(e) => setCompletionRatio(e.target.value)}
-            />
-          </div>
-        </div>
-        <div className='grid gap-2'>
           <Label>{t('Effective time')}</Label>
           <Input
             type='datetime-local'
@@ -133,6 +120,10 @@ function ModelPriceScheduleDialogInner(props: ModelPriceScheduleDialogProps) {
             onChange={(e) => setEffectiveAt(e.target.value)}
           />
         </div>
+        <ModelPricingEditorPanel
+          ref={panelRef}
+          className='h-[min(60vh,560px)] min-h-0'
+        />
       </div>
     </Dialog>
   )

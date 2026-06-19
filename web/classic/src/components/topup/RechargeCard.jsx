@@ -418,7 +418,7 @@ const RechargeCard = ({
                       <span>{t('选择充值额度')}</span>
                       {(() => {
                         const { symbol, rate, type } = getCurrencyConfig();
-                        if (type === 'USD') return null;
+                        if (type === 'TOKENS') return null;
 
                         return (
                           <span
@@ -428,7 +428,7 @@ const RechargeCard = ({
                               fontWeight: 'normal',
                             }}
                           >
-                            (1 $ = {rate.toFixed(2)} {symbol})
+                            (1 元 = {rate.toFixed(2)} {symbol})
                           </span>
                         );
                       })()}
@@ -447,14 +447,14 @@ const RechargeCard = ({
                       const actualPay = discountedPrice;
                       const save = originalPrice - discountedPrice;
 
-                      // 根据当前货币类型换算显示金额和数量
+                      // 根据当前货币类型换算显示金额和数量（人民币锚定：基准即元）
                       const { symbol, rate, type } = getCurrencyConfig();
                       const statusStr = localStorage.getItem('status');
-                      let usdRate = 7; // 默认CNY汇率
+                      let cnyRate = 1; // 人民币锚定后展示汇率默认 1
                       try {
                         if (statusStr) {
                           const s = JSON.parse(statusStr);
-                          usdRate = s?.usd_exchange_rate || 7;
+                          cnyRate = s?.usd_exchange_rate || 1;
                         }
                       } catch (e) {}
 
@@ -462,18 +462,14 @@ const RechargeCard = ({
                       let displayActualPay = actualPay;
                       let displaySave = save;
 
-                      if (type === 'USD') {
-                        // 数量保持USD，价格从CNY转USD
-                        displayActualPay = actualPay / usdRate;
-                        displaySave = save / usdRate;
-                      } else if (type === 'CNY') {
-                        // 数量转CNY，价格已是CNY
-                        displayValue = preset.value * usdRate;
+                      if (type === 'CNY') {
+                        // 数量按展示汇率换算，价格已是元
+                        displayValue = preset.value * cnyRate;
                       } else if (type === 'CUSTOM') {
-                        // 数量和价格都转自定义货币
+                        // 数量和价格都转自定义货币（元 × 汇率）
                         displayValue = preset.value * rate;
-                        displayActualPay = (actualPay / usdRate) * rate;
-                        displaySave = (save / usdRate) * rate;
+                        displayActualPay = actualPay * rate;
+                        displaySave = save * rate;
                       }
 
                       return (

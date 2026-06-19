@@ -157,15 +157,13 @@ export function DynamicPricingBreakdown({
 
   const { symbol, rate } = useMemo(() => {
     if (currency.quotaDisplayType === 'CNY') {
-      return { symbol: '¥', rate: currency.usdExchangeRate || 7 }
+      return { symbol: '¥', rate: currency.usdExchangeRate || 1 }
     }
-    if (currency.quotaDisplayType === 'CUSTOM') {
-      return {
-        symbol: currency.customCurrencySymbol || '¤',
-        rate: currency.customCurrencyExchangeRate || 1,
-      }
+    // 人民币锚定：默认即积分（CUSTOM），历史 USD 配置一并回退至此
+    return {
+      symbol: currency.customCurrencySymbol || '积分',
+      rate: currency.customCurrencyExchangeRate || 1,
     }
-    return { symbol: '$', rate: 1 }
   }, [currency])
 
   const { tiers, ruleGroups } = useMemo(() => {

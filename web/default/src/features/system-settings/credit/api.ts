@@ -51,9 +51,26 @@ export async function deleteRechargeTier(id: string): Promise<void> {
 // 模型价格定时生效 (Model Price Schedule) — /api/admin/model-price-schedule/*
 // ============================================================================
 
+export interface ModelPriceSchedulePayload {
+  name: string
+  billingMode: string
+  price: string
+  ratio: string
+  cacheRatio: string
+  createCacheRatio: string
+  completionRatio: string
+  imageRatio: string
+  audioRatio: string
+  audioCompletionRatio: string
+  billingExpr: string
+  requestRuleExpr: string
+}
+
 export interface ModelPriceSchedule {
   id: number
   model_name: string
+  payload: string
+  // 旧版字段，存量计划仍可能填充
   model_ratio: number
   completion_ratio: number
   effective_at: number
@@ -65,8 +82,7 @@ export interface ModelPriceSchedule {
 
 export interface CreateModelPriceScheduleRequest {
   model_name: string
-  model_ratio: number
-  completion_ratio: number
+  payload: ModelPriceSchedulePayload
   effective_at: number
 }
 

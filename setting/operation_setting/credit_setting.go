@@ -32,7 +32,7 @@ type CreditSetting struct {
 }
 
 var creditSetting = CreditSetting{
-	RoundToDisplayPrecision:   false,
+	RoundToDisplayPrecision:   true,
 	GiftDefaultValidityDays:   30,
 	TopupDefaultValidityDays:  0,
 	LowBalanceWarnPercent:     20,

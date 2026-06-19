@@ -2,12 +2,15 @@ package service
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
@@ -101,67 +104,208 @@ func applyDueModelPriceSchedules() {
 	if len(schedules) == 0 {
 		return
 	}
-	modelRatios := map[string]float64{}
-	completionRatios := map[string]float64{}
+
+	// 收集所有价格相关 option 的当前值，逐条计划合并进去，最后统一写回。
+	patch := newPricingPatch()
 	for _, s := range schedules {
-		if s.ModelRatio > 0 {
-			modelRatios[s.ModelName] = s.ModelRatio
-		}
-		if s.CompletionRatio > 0 {
-			completionRatios[s.ModelName] = s.CompletionRatio
-		}
-	}
-	if len(modelRatios) > 0 {
-		if err := applyRatioPatch(ratio_setting.ModelRatio2JSONString, ratio_setting.UpdateModelRatioByJSONString, modelRatios); err != nil {
-			common.SysLog("credit maintenance: apply model ratio error: " + err.Error())
-			return
+		if s.Payload != "" {
+			if err := patch.applySnapshot(s.Payload); err != nil {
+				common.SysLog(fmt.Sprintf("credit maintenance: apply price snapshot (model %s) error: %s", s.ModelName, err.Error()))
+			}
+		} else {
+			// 旧版兼容：只含 ModelRatio/CompletionRatio 的历史计划
+			patch.applyLegacyRatio(s.ModelName, s.ModelRatio, s.CompletionRatio)
 		}
 	}
-	if len(completionRatios) > 0 {
-		if err := applyRatioPatch(ratio_setting.CompletionRatio2JSONString, ratio_setting.UpdateCompletionRatioByJSONString, completionRatios); err != nil {
-			common.SysLog("credit maintenance: apply completion ratio error: " + err.Error())
-			return
-		}
+
+	if err := patch.persist(); err != nil {
+		common.SysLog("credit maintenance: persist price schedules error: " + err.Error())
+		return
 	}
+
 	appliedAt := common.GetTimestamp()
 	for _, s := range schedules {
 		if err := model.MarkModelPriceScheduleApplied(nil, s.Id, appliedAt); err != nil {
 			common.SysLog("credit maintenance: mark price schedule applied error: " + err.Error())
 		}
 	}
-	// 持久化到 Option 表，保证重启后生效
-	persistRatioOption("ModelRatio", ratio_setting.ModelRatio2JSONString())
-	persistRatioOption("CompletionRatio", ratio_setting.CompletionRatio2JSONString())
 }
 
-// applyRatioPatch 读取当前倍率 JSON，合并 patch 后写回内存映射。
-func applyRatioPatch(currentJSON func() string, update func(string) error, patch map[string]float64) error {
-	merged, err := mergeRatioJSON(currentJSON(), patch)
-	if err != nil {
+// modelPriceSnapshot 与前端 ModelRatioData 对齐的价格表单快照。
+type modelPriceSnapshot struct {
+	Name                 string `json:"name"`
+	BillingMode          string `json:"billingMode"`
+	Price                string `json:"price"`
+	Ratio                string `json:"ratio"`
+	CacheRatio           string `json:"cacheRatio"`
+	CreateCacheRatio     string `json:"createCacheRatio"`
+	CompletionRatio      string `json:"completionRatio"`
+	ImageRatio           string `json:"imageRatio"`
+	AudioRatio           string `json:"audioRatio"`
+	AudioCompletionRatio string `json:"audioCompletionRatio"`
+	BillingExpr          string `json:"billingExpr"`
+	RequestRuleExpr      string `json:"requestRuleExpr"`
+}
+
+// pricingPatch 聚合所有价格 option 的当前映射，支持逐模型合并后统一持久化。
+type pricingPatch struct {
+	price           map[string]float64
+	ratio           map[string]float64
+	cache           map[string]float64
+	createCache     map[string]float64
+	completion      map[string]float64
+	image           map[string]float64
+	audio           map[string]float64
+	audioCompletion map[string]float64
+	billingMode     map[string]string
+	billingExpr     map[string]string
+}
+
+func newPricingPatch() *pricingPatch {
+	return &pricingPatch{
+		price:           parseFloatMap(ratio_setting.ModelPrice2JSONString()),
+		ratio:           parseFloatMap(ratio_setting.ModelRatio2JSONString()),
+		cache:           parseFloatMap(ratio_setting.CacheRatio2JSONString()),
+		createCache:     parseFloatMap(ratio_setting.CreateCacheRatio2JSONString()),
+		completion:      parseFloatMap(ratio_setting.CompletionRatio2JSONString()),
+		image:           parseFloatMap(ratio_setting.ImageRatio2JSONString()),
+		audio:           parseFloatMap(ratio_setting.AudioRatio2JSONString()),
+		audioCompletion: parseFloatMap(ratio_setting.AudioCompletionRatio2JSONString()),
+		billingMode:     parseStringMap(billing_setting.GetBillingModeCopy()),
+		billingExpr:     parseStringMap(billing_setting.GetBillingExprCopy()),
+	}
+}
+
+// applySnapshot 把一份价格快照按 billingMode 分支合并进各映射（对齐前端 persistPricingData）。
+func (p *pricingPatch) applySnapshot(payloadJSON string) error {
+	var snap modelPriceSnapshot
+	if err := common.UnmarshalJsonStr(payloadJSON, &snap); err != nil {
 		return err
 	}
-	return update(merged)
-}
+	name := snap.Name
+	if name == "" {
+		return fmt.Errorf("snapshot missing model name")
+	}
 
-func mergeRatioJSON(currentJSON string, patch map[string]float64) (string, error) {
-	current := map[string]float64{}
-	if currentJSON != "" {
-		if err := common.UnmarshalJsonStr(currentJSON, &current); err != nil {
-			return "", err
+	// 先清掉该模型在所有映射里的旧条目，避免模式切换残留。
+	delete(p.price, name)
+	delete(p.ratio, name)
+	delete(p.cache, name)
+	delete(p.createCache, name)
+	delete(p.completion, name)
+	delete(p.image, name)
+	delete(p.audio, name)
+	delete(p.audioCompletion, name)
+	delete(p.billingMode, name)
+	delete(p.billingExpr, name)
+
+	setIfPresent := func(m map[string]float64, v string) {
+		if v == "" {
+			return
+		}
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			m[name] = f
 		}
 	}
-	for k, v := range patch {
-		current[k] = v
+
+	if snap.BillingMode == billing_setting.BillingModeTieredExpr {
+		combined := combineBillingExpr(snap.BillingExpr, snap.RequestRuleExpr)
+		if combined != "" {
+			p.billingMode[name] = billing_setting.BillingModeTieredExpr
+			p.billingExpr[name] = combined
+		}
+		// tiered_expr 同时保留 ratio/price 作为多实例同步延迟期的 fallback。
+		setIfPresent(p.price, snap.Price)
+		setIfPresent(p.ratio, snap.Ratio)
+		setIfPresent(p.cache, snap.CacheRatio)
+		setIfPresent(p.createCache, snap.CreateCacheRatio)
+		setIfPresent(p.completion, snap.CompletionRatio)
+		setIfPresent(p.image, snap.ImageRatio)
+		setIfPresent(p.audio, snap.AudioRatio)
+		setIfPresent(p.audioCompletion, snap.AudioCompletionRatio)
+	} else if snap.Price != "" {
+		// 按次计费：只写固定价格
+		setIfPresent(p.price, snap.Price)
+	} else {
+		// 按 token 计费：写各类倍率
+		setIfPresent(p.ratio, snap.Ratio)
+		setIfPresent(p.cache, snap.CacheRatio)
+		setIfPresent(p.createCache, snap.CreateCacheRatio)
+		setIfPresent(p.completion, snap.CompletionRatio)
+		setIfPresent(p.image, snap.ImageRatio)
+		setIfPresent(p.audio, snap.AudioRatio)
+		setIfPresent(p.audioCompletion, snap.AudioCompletionRatio)
 	}
-	out, err := common.Marshal(current)
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
+	return nil
 }
 
-func persistRatioOption(key, value string) {
-	if err := model.UpdateOption(key, value); err != nil {
-		common.SysLog("credit maintenance: persist " + key + " error: " + err.Error())
+// applyLegacyRatio 兼容旧版只含倍率的计划。
+func (p *pricingPatch) applyLegacyRatio(name string, modelRatio, completionRatio float64) {
+	if name == "" {
+		return
 	}
+	if modelRatio > 0 {
+		p.ratio[name] = modelRatio
+	}
+	if completionRatio > 0 {
+		p.completion[name] = completionRatio
+	}
+}
+
+// persist 把合并后的各映射通过 model.UpdateOption 落地（同时持久化 + 更新内存 + 失效缓存）。
+func (p *pricingPatch) persist() error {
+	updates := []struct {
+		key string
+		m   any
+	}{
+		{"ModelPrice", p.price},
+		{"ModelRatio", p.ratio},
+		{"CacheRatio", p.cache},
+		{"CreateCacheRatio", p.createCache},
+		{"CompletionRatio", p.completion},
+		{"ImageRatio", p.image},
+		{"AudioRatio", p.audio},
+		{"AudioCompletionRatio", p.audioCompletion},
+		{"billing_setting." + billing_setting.BillingModeField, p.billingMode},
+		{"billing_setting." + billing_setting.BillingExprField, p.billingExpr},
+	}
+	for _, u := range updates {
+		out, err := common.Marshal(u.m)
+		if err != nil {
+			return err
+		}
+		if err := model.UpdateOption(u.key, string(out)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// combineBillingExpr 对齐前端 combineBillingExpr：base 与 requestRule 组合。
+func combineBillingExpr(baseExpr, requestRuleExpr string) string {
+	base := strings.TrimSpace(baseExpr)
+	rules := strings.TrimSpace(requestRuleExpr)
+	if base == "" {
+		return ""
+	}
+	if rules == "" {
+		return base
+	}
+	return fmt.Sprintf("(%s) * %s", base, rules)
+}
+
+func parseFloatMap(jsonStr string) map[string]float64 {
+	m := map[string]float64{}
+	if jsonStr != "" {
+		_ = common.UnmarshalJsonStr(jsonStr, &m)
+	}
+	return m
+}
+
+func parseStringMap(src map[string]string) map[string]string {
+	m := map[string]string{}
+	for k, v := range src {
+		m[k] = v
+	}
+	return m
 }

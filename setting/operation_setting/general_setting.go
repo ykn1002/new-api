@@ -14,11 +14,11 @@ type GeneralSetting struct {
 	DocsLink            string `json:"docs_link"`
 	PingIntervalEnabled bool   `json:"ping_interval_enabled"`
 	PingIntervalSeconds int    `json:"ping_interval_seconds"`
-	// 当前站点额度展示类型：USD / CNY / TOKENS
+	// 当前站点额度展示类型：CUSTOM（积分，默认）/ CNY / TOKENS
 	QuotaDisplayType string `json:"quota_display_type"`
 	// 自定义货币符号，用于 CUSTOM 展示类型
 	CustomCurrencySymbol string `json:"custom_currency_symbol"`
-	// 自定义货币与美元汇率（1 USD = X Custom）
+	// 自定义货币与人民币汇率（1 元 = X Custom）
 	CustomCurrencyExchangeRate float64 `json:"custom_currency_exchange_rate"`
 }
 
@@ -27,9 +27,9 @@ var generalSetting = GeneralSetting{
 	DocsLink:                   "https://docs.newapi.pro",
 	PingIntervalEnabled:        false,
 	PingIntervalSeconds:        60,
-	QuotaDisplayType:           QuotaDisplayTypeUSD,
-	CustomCurrencySymbol:       "¤",
-	CustomCurrencyExchangeRate: 1.0,
+	QuotaDisplayType:           QuotaDisplayTypeCustom,
+	CustomCurrencySymbol:       "积分",
+	CustomCurrencyExchangeRate: 100.0,
 }
 
 func init() {
@@ -59,33 +59,29 @@ func GetQuotaDisplayType() string {
 // GetCurrencySymbol 返回当前展示类型对应符号
 func GetCurrencySymbol() string {
 	switch generalSetting.QuotaDisplayType {
-	case QuotaDisplayTypeUSD:
-		return "$"
 	case QuotaDisplayTypeCNY:
 		return "¥"
-	case QuotaDisplayTypeCustom:
+	case QuotaDisplayTypeTokens:
+		return ""
+	default: // CUSTOM（积分），历史 USD 配置一并回退至此
 		if generalSetting.CustomCurrencySymbol != "" {
 			return generalSetting.CustomCurrencySymbol
 		}
-		return "¤"
-	default:
-		return ""
+		return "积分"
 	}
 }
 
-// GetUsdToCurrencyRate 返回 1 USD = X <currency> 的 X（TOKENS 不适用）
-func GetUsdToCurrencyRate(usdToCny float64) float64 {
+// GetUsdToCurrencyRate 返回 1 元 = X <currency> 的 X（TOKENS 不适用）
+func GetUsdToCurrencyRate(cnyRate float64) float64 {
 	switch generalSetting.QuotaDisplayType {
-	case QuotaDisplayTypeUSD:
-		return 1
 	case QuotaDisplayTypeCNY:
-		return usdToCny
-	case QuotaDisplayTypeCustom:
+		return cnyRate
+	case QuotaDisplayTypeTokens:
+		return 1
+	default: // CUSTOM（积分），历史 USD 配置一并回退至此
 		if generalSetting.CustomCurrencyExchangeRate > 0 {
 			return generalSetting.CustomCurrencyExchangeRate
 		}
-		return 1
-	default:
 		return 1
 	}
 }

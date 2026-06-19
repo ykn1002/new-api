@@ -48,11 +48,11 @@ export interface SystemConfig {
 
 export const DEFAULT_CURRENCY_CONFIG: CurrencyConfig = {
   displayInCurrency: true,
-  quotaDisplayType: 'USD',
+  quotaDisplayType: 'CUSTOM',
   quotaPerUnit: 500000,
   usdExchangeRate: 1,
-  customCurrencySymbol: '¤',
-  customCurrencyExchangeRate: 1,
+  customCurrencySymbol: '积分',
+  customCurrencyExchangeRate: 100,
 }
 
 interface SystemConfigState {

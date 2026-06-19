@@ -31,8 +31,43 @@ import {
   deleteModelPriceSchedule,
   listModelPriceSchedules,
   type ModelPriceSchedule,
+  type ModelPriceSchedulePayload,
 } from './api'
 import { ModelPriceScheduleDialog } from './model-price-schedule-dialog'
+
+// describeSchedule 把价格快照渲染成一行人类可读的价格描述（人民币计）。
+function describeSchedule(
+  s: ModelPriceSchedule,
+  t: (k: string) => string
+): string {
+  const parsePayload = (): ModelPriceSchedulePayload | null => {
+    if (!s.payload) return null
+    try {
+      return JSON.parse(s.payload) as ModelPriceSchedulePayload
+    } catch {
+      return null
+    }
+  }
+  const p = parsePayload()
+  if (p) {
+    if (p.billingMode === 'tiered_expr') {
+      return t('Expression pricing')
+    }
+    if (p.price) {
+      return `${t('Fixed price')} ￥${p.price}/${t('request')}`
+    }
+    const parts: string[] = []
+    if (p.ratio)
+      parts.push(`${t('Input price')} ${(Number(p.ratio) * 2).toFixed(2)}`)
+    if (p.completionRatio && p.ratio)
+      parts.push(
+        `${t('Output price')} ${(Number(p.ratio) * 2 * Number(p.completionRatio)).toFixed(2)}`
+      )
+    if (parts.length > 0) return `${parts.join(' · ')} ￥/1M`
+  }
+  // 旧版兼容：只有倍率
+  return `${t('Model ratio')} ${s.model_ratio} · ${t('Completion ratio')} ${s.completion_ratio}`
+}
 
 export function ModelPriceScheduleSection() {
   const { t } = useTranslation()
@@ -94,8 +129,7 @@ export function ModelPriceScheduleSection() {
                   </Badge>
                 </div>
                 <div className='text-muted-foreground mt-1 text-xs'>
-                  {t('Model ratio')} {s.model_ratio} · {t('Completion ratio')}{' '}
-                  {s.completion_ratio} · {t('Effective at')}{' '}
+                  {describeSchedule(s, t)} · {t('Effective at')}{' '}
                   {formatTimestampToDate(s.effective_at)}
                 </div>
               </div>

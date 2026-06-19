@@ -120,29 +120,25 @@ func logHelper(ctx context.Context, level string, msg string) {
 }
 
 func LogQuota(quota int) string {
-	// 新逻辑：根据额度展示类型输出
+	// 根据额度展示类型输出（人民币锚定：quota/QuotaPerUnit 即为人民币元）
 	q := float64(quota)
 	switch operation_setting.GetQuotaDisplayType() {
 	case operation_setting.QuotaDisplayTypeCNY:
-		usd := q / common.QuotaPerUnit
-		cny := usd * operation_setting.USDExchangeRate
+		cny := q / common.QuotaPerUnit * operation_setting.USDExchangeRate
 		return fmt.Sprintf("¥%.6f 额度", cny)
-	case operation_setting.QuotaDisplayTypeCustom:
-		usd := q / common.QuotaPerUnit
+	case operation_setting.QuotaDisplayTypeTokens:
+		return fmt.Sprintf("%d 点额度", quota)
+	default: // CUSTOM（积分），历史 USD 配置一并回退至此
+		yuan := q / common.QuotaPerUnit
 		rate := operation_setting.GetGeneralSetting().CustomCurrencyExchangeRate
 		symbol := operation_setting.GetGeneralSetting().CustomCurrencySymbol
 		if symbol == "" {
-			symbol = "¤"
+			symbol = "积分"
 		}
 		if rate <= 0 {
 			rate = 1
 		}
-		v := usd * rate
-		return fmt.Sprintf("%s%.6f 额度", symbol, v)
-	case operation_setting.QuotaDisplayTypeTokens:
-		return fmt.Sprintf("%d 点额度", quota)
-	default: // USD
-		return fmt.Sprintf("＄%.6f 额度", q/common.QuotaPerUnit)
+		return fmt.Sprintf("%s%.6f 额度", symbol, yuan*rate)
 	}
 }
 
@@ -150,25 +146,21 @@ func FormatQuota(quota int) string {
 	q := float64(quota)
 	switch operation_setting.GetQuotaDisplayType() {
 	case operation_setting.QuotaDisplayTypeCNY:
-		usd := q / common.QuotaPerUnit
-		cny := usd * operation_setting.USDExchangeRate
+		cny := q / common.QuotaPerUnit * operation_setting.USDExchangeRate
 		return fmt.Sprintf("¥%.6f", cny)
-	case operation_setting.QuotaDisplayTypeCustom:
-		usd := q / common.QuotaPerUnit
+	case operation_setting.QuotaDisplayTypeTokens:
+		return fmt.Sprintf("%d", quota)
+	default: // CUSTOM（积分），历史 USD 配置一并回退至此
+		yuan := q / common.QuotaPerUnit
 		rate := operation_setting.GetGeneralSetting().CustomCurrencyExchangeRate
 		symbol := operation_setting.GetGeneralSetting().CustomCurrencySymbol
 		if symbol == "" {
-			symbol = "¤"
+			symbol = "积分"
 		}
 		if rate <= 0 {
 			rate = 1
 		}
-		v := usd * rate
-		return fmt.Sprintf("%s%.6f", symbol, v)
-	case operation_setting.QuotaDisplayTypeTokens:
-		return fmt.Sprintf("%d", quota)
-	default:
-		return fmt.Sprintf("＄%.6f", q/common.QuotaPerUnit)
+		return fmt.Sprintf("%s%.6f", symbol, yuan*rate)
 	}
 }
 

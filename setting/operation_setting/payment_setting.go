@@ -55,11 +55,27 @@ func IsPaymentComplianceConfirmed() bool {
 		paymentSetting.ComplianceTermsVersion == CurrentComplianceTermsVersion
 }
 
+// EffectiveBaseCredits 返回档位的基础积分：以 Amount（元）为唯一定价基准。
+// 后台显式填写 BaseCredits（>0）时按覆写值，否则由 Amount × 自定义货币汇率派生，
+// 保证微信支付（按 Amount 入账）与管理员代充（按 BaseCredits 入账）口径一致。
+func (t RechargeTier) EffectiveBaseCredits() int64 {
+	if t.BaseCredits > 0 {
+		return t.BaseCredits
+	}
+	rate := GetGeneralSetting().CustomCurrencyExchangeRate
+	if rate <= 0 {
+		rate = 1
+	}
+	return int64(t.Amount*rate + 0.5)
+}
+
 // GetActiveRechargeTiers 返回已上架的充值档位，按 SortOrder 升序。
 func GetActiveRechargeTiers() []RechargeTier {
 	tiers := make([]RechargeTier, 0, len(paymentSetting.RechargeTiers))
 	for _, t := range paymentSetting.RechargeTiers {
 		if t.Status == 1 {
+			// 对外展示统一回填派生的基础积分，避免前端显示与实际到账不一致
+			t.BaseCredits = t.EffectiveBaseCredits()
 			tiers = append(tiers, t)
 		}
 	}

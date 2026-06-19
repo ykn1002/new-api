@@ -11,7 +11,16 @@ func isPaymentComplianceConfirmed() bool {
 	return operation_setting.IsPaymentComplianceConfirmed()
 }
 
+// enableForeignCurrencyTopUp 控制外币支付渠道（Stripe / Creem / Waffo / Waffo Pancake）总开关。
+// 人民币锚定改造后默认关闭：这些渠道以美元/外币计价，与「人民币 + 积分」口径不符，
+// 仅保留微信支付 + 易支付两条人民币渠道。相关 controller / setting / 前端组件全部保留，
+// 需恢复外币支付时把此值改回 true 即可（用 var 便于测试临时切换）。
+var enableForeignCurrencyTopUp = false
+
 func isStripeTopUpEnabled() bool {
+	if !enableForeignCurrencyTopUp {
+		return false
+	}
 	if !isPaymentComplianceConfirmed() {
 		return false
 	}
@@ -29,6 +38,9 @@ func isStripeWebhookEnabled() bool {
 }
 
 func isCreemTopUpEnabled() bool {
+	if !enableForeignCurrencyTopUp {
+		return false
+	}
 	if !isPaymentComplianceConfirmed() {
 		return false
 	}
@@ -47,6 +59,9 @@ func isCreemWebhookEnabled() bool {
 }
 
 func isWaffoTopUpEnabled() bool {
+	if !enableForeignCurrencyTopUp {
+		return false
+	}
 	if !isPaymentComplianceConfirmed() {
 		return false
 	}
@@ -74,6 +89,9 @@ func isWaffoWebhookEnabled() bool {
 }
 
 func isWaffoPancakeTopUpEnabled() bool {
+	if !enableForeignCurrencyTopUp {
+		return false
+	}
 	if !isPaymentComplianceConfirmed() {
 		return false
 	}

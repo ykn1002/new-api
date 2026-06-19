@@ -8,12 +8,17 @@ import (
 
 // ModelPriceSchedule 模型价格定时生效计划（缺口 A-7）。
 //
-// 改价不再立即生效，而是登记一条「待生效」计划，到点由定时任务落地：
-// 调 ratio_setting.UpdateModelRatioByJSONString / UpdateCompletionRatioByJSONString。
+// 改价不再立即生效，而是登记一条「待生效」计划，到点由定时任务落地。
+// 旧版只存 ModelRatio/CompletionRatio 两个倍率；新版改为存「价格表单完整快照」
+// （Payload，与前端 ModelRatioData 一致），到点按各字段（ModelPrice/各类 Ratio/
+// billing_mode/billing_expr）落地，与「调整价格表单」立即保存效果一致。
 // 只影响后续请求，不回溯存量。
 type ModelPriceSchedule struct {
-	Id              int     `json:"id"`
-	ModelName       string  `json:"model_name" gorm:"type:varchar(128);index"`
+	Id        int    `json:"id"`
+	ModelName string `json:"model_name" gorm:"type:varchar(128);index"`
+	// Payload 存价格表单快照 JSON（前端 ModelRatioData）。为空时回退旧 ModelRatio/CompletionRatio。
+	Payload string `json:"payload" gorm:"type:text"`
+	// ModelRatio/CompletionRatio 为旧版字段，保留以兼容存量计划。
 	ModelRatio      float64 `json:"model_ratio"`
 	CompletionRatio float64 `json:"completion_ratio"`
 	EffectiveAt     int64   `json:"effective_at" gorm:"bigint;index"` // 生效时间戳
